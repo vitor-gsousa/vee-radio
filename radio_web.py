@@ -1,5 +1,7 @@
+import html
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -192,6 +194,24 @@ def write_m3u(path, entries):
                 f.write(f"#EXTINF:-1,{name}\n")
             f.write(url + "\n")
 
+def xml_tag(text, *tags):
+    # Expressão regular em vez de parser XML: o título ICY pode chegar cortado
+    for tag in tags:
+        m = re.search(rf"<{tag}>(.*?)</{tag}>", text, re.S)
+        if m and m.group(1).strip():
+            return html.unescape(m.group(1).strip())
+    return ""
+
+def clean_title(title):
+    # As rádios da Bauer (Comercial, M80, Cidade...) mandam um XML no título ICY
+    # em vez de "Artista - Música"; fica só o artista e a música, ou nada
+    if not title.lstrip().startswith("<"):
+        return title
+    artist = xml_tag(title, "DB_DALET_ARTIST_NAME", "DB_LEAD_ARTIST_NAME")
+    song = xml_tag(title, "DB_DALET_TITLE_NAME", "DB_SONG_NAME")
+    # Sem artista, o DB_DALET_TITLE_NAME costuma ser o slogan da rádio
+    return f"{artist} - {song}" if artist and song else ""
+
 def station_names():
     # URL -> nome, juntando todas as playlists guardadas e o ficheiro de nomes
     paths = []
@@ -225,7 +245,7 @@ def render_index(results=None, query="", only_pt=False):
 
     names = station_names()
     current_station = names.get(current.get('file')) or current.get('name') or current.get('file', '')
-    current_title = current.get('title', '')
+    current_title = clean_title(current.get('title', ''))
     try:
         with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
             public_url = f.read().strip()

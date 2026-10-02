@@ -18,6 +18,8 @@ NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
 # Escrito pelo start.sh com o link do Cloudflare Tunnel
 TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
 
+STREAM_FAILED_HINT = 'O endereço pode ter mudado. Procura a rádio outra vez em "Procurar Rádio" e remove a antiga da fila.'
+
 HTML = """
 <!DOCTYPE html>
 <html>
@@ -39,6 +41,7 @@ HTML = """
         .del-btn { width: 18%; background: #f38ba8; color: #11111b; margin: 0; font-size: 12px; }
         .result-btn { text-align: left; margin: 6px 0 0 0; }
         .meta { font-size: 12px; color: #a6adc8; margin: 2px 0 8px 4px; }
+        .warn { border-left: 4px solid #f38ba8; background: #313244; padding: 10px; border-radius: 6px; margin: 10px 0; }
     </style>
 </head>
 <body>
@@ -49,6 +52,12 @@ HTML = """
         <p><strong>Estação:</strong> {{ current_station or 'Parado' }}</p>
         {% if current_title %}<p><strong>Faixa:</strong> {{ current_title }}</p>{% endif %}
         <p><strong>Estado:</strong> {{ status.state }} | <strong>Volume:</strong> {{ status.volume }}%</p>
+        {% if status.error %}
+        <div class="warn">
+            <strong>A última rádio não tocou.</strong> {{ hint }}
+            <div class="meta">{{ status.error }}</div>
+        </div>
+        {% endif %}
         <form action="/stop" method="post"><button class="stop">Parar</button></form>
         <div>
             <form action="/voldown" method="post" style="display:inline;"><button class="vol">- Vol</button></form>
@@ -234,7 +243,10 @@ def mpd_unreachable(e):
 
 @app.errorhandler(MPDError)
 def mpd_failed(e):
-    return render_template_string(ERROR_HTML, title="Erro do MPD", message=str(e)), 500
+    if "Failed to decode" in str(e):
+        # O stream não respondeu (link mudou, rádio em baixo): explica em vez de mostrar só o erro técnico
+        return error_page("Esta rádio não está a responder", f"{STREAM_FAILED_HINT} ({e})", 502)
+    return error_page("Erro do MPD", str(e), 500)
 
 def render_index(results=None, query="", only_pt=False):
     with mpd_client() as c:
@@ -253,7 +265,8 @@ def render_index(results=None, query="", only_pt=False):
         public_url = ""
     return render_template_string(HTML, status=status, current_station=current_station, current_title=current_title,
                                   queue=queue, playlists=stored_playlists, names=names,
-                                  results=results, query=query, only_pt=only_pt, public_url=public_url)
+                                  results=results, query=query, only_pt=only_pt, public_url=public_url,
+                                  hint=STREAM_FAILED_HINT)
 
 @app.route("/")
 def index():

@@ -13,10 +13,11 @@ rm -f ~/tunnel-url.txt
 echo "A iniciar MPD..."
 mpd
 sleep 1
-# Só carrega as rádios se a fila restaurada pelo MPD estiver vazia (evita duplicados)
-if [ -z "$(mpc playlist 2>/dev/null)" ]; then
-    # O comando web passa a guardar nesta playlist o que se juntar ou remover
-    mpc load radios >/dev/null 2>&1 && echo radios > ~/.config/mpd/playlist-ativa.txt
+# O MPD restaura a fila sozinho; se vier vazia, volta a carregar a playlist ativa
+# do comando web (evita duplicados)
+ACTIVE="$(cat ~/.config/mpd/playlist-ativa.txt 2>/dev/null)"
+if [ -n "$ACTIVE" ] && [ -z "$(mpc playlist 2>/dev/null)" ]; then
+    mpc load "$ACTIVE" >/dev/null 2>&1 || true
 fi
 
 echo "A iniciar servidor Web (porta 8080)..."

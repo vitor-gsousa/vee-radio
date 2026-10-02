@@ -9,23 +9,32 @@
     <div class="side">
     <div class="card">
         <h3>A Tocar Agora</h3>
-        <p><strong>Estação:</strong> {{ current_station or '—' }}</p>
-        {% if current_title %}<p><strong>Faixa:</strong> {{ current_title }}</p>{% endif %}
-        <p class="meta">{{ state }}{% if status.volume and status.volume != '-1' %} · Volume {{ status.volume }}%{% endif %}</p>
+        <div class="now">
+            {% if current_key %}
+            <img class="now-logo" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">
+            {% else %}
+            <div class="now-logo empty">📻</div>
+            {% endif %}
+            <div class="now-info">
+                <div class="now-station">{{ current_station or 'Nenhuma estação' }}</div>
+                {% if current_title %}<div class="now-title">{{ current_title }}</div>{% endif %}
+                <div class="meta">{{ state }}{% if status.volume and status.volume != '-1' %} · Volume {{ status.volume }}%{% endif %}</div>
+            </div>
+        </div>
         {% if status.error %}
         <div class="warn">
             <strong>A última rádio não tocou.</strong> {{ hint }}
             <div class="meta">{{ status.error }}</div>
         </div>
         {% endif %}
-        <div class="row">
+        <div class="row controls">
             {% if status.state == 'play' %}
-            <form action="/stop" method="post"><button class="stop">Parar</button></form>
+            <form action="/stop" method="post" class="grow"><button class="stop">Parar</button></form>
             {% elif stations %}
-            <form action="/play" method="post"><button class="btn-green">Tocar</button></form>
+            <form action="/play" method="post" class="grow"><button class="btn-green">Tocar</button></form>
             {% endif %}
-            <form action="/voldown" method="post"><button class="vol small">− Vol</button></form>
-            <form action="/volup" method="post"><button class="vol small">+ Vol</button></form>
+            <form action="/voldown" method="post"><button class="vol">− Vol</button></form>
+            <form action="/volup" method="post"><button class="vol">+ Vol</button></form>
         </div>
     </div>
     </div>
@@ -40,17 +49,24 @@
         </div>
         <div class="stations">
         {% for s in stations %}
-            <div class="row">
+            <div class="tile{% if s.current %} current{% endif %}">
                 <form action="/play_pos/{{ s.pos }}" method="post">
-                    <button class="station{% if s.current %} playing{% endif %}">{% if s.current %}▶ {% endif %}{{ s.name }}</button>
+                    <button class="tile-play" title="Tocar {{ s.name }}">
+                        <img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy">
+                        <span class="tile-name">{{ s.name }}</span>
+                    </button>
                 </form>
-                <form action="/remove/{{ s.pos }}" method="post"><button class="del small" title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
+                {% if s.current %}<span class="badge">▶<span class="badge-text"> A tocar</span></span>{% endif %}
+                <form action="/remove/{{ s.pos }}" method="post" class="tile-del"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
             </div>
         {% else %}
-            <p class="meta">Ainda não há estações. Junta uma rádio para começar.</p>
+            <p class="meta empty">Ainda não há estações. Junta uma rádio ou escolhe um tema para começar.</p>
         {% endfor %}
         </div>
-        <a class="btn btn-green" href="#juntar">+ Juntar rádio</a>
+        <div class="row">
+            <a class="btn btn-green" href="#juntar">+ Juntar rádio</a>
+            <a class="btn btn-blue" href="#temas">🎵 Temas</a>
+        </div>
         {% if not active and stations %}
             <a class="btn" href="#nova">Guardar como playlist</a>
         {% endif %}
@@ -113,6 +129,78 @@
         </div>
     </div>
 
+    <div class="modal" id="temas">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>Temas</h3>
+            <p class="meta">Escolhe um tema para ver as rádios mais ouvidas e juntá-las a uma playlist.</p>
+            <form action="/tema#tema" method="get">
+                <label><input type="checkbox" name="pt" value="1" {% if only_pt %}checked{% endif %}> Só rádios portuguesas</label>
+                <div class="chips">
+                    {% for tag, label in themes %}<button name="t" value="{{ tag }}">{{ label }}</button>{% endfor %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if theme %}
+    {% set existing = playlists|map(attribute='name')|list %}
+    <div class="modal" id="tema">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>{{ theme.label }}</h3>
+            <p class="meta"><a href="#temas">← Temas</a> · {% if theme.results %}as {{ theme.results|length }} rádios mais ouvidas{% endif %}{% if only_pt %} portuguesas{% endif %}</p>
+            {% if theme.results %}
+            <form action="/add_theme" method="post" class="theme-add">
+                <input type="hidden" name="label" value="{{ theme.label }}">
+                {% for r in theme.results %}
+                <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                <input type="hidden" name="name" value="{{ r.name }}">
+                <input type="hidden" name="logo" value="{{ r.favicon }}">
+                {% endfor %}
+                <label class="meta" for="theme-target">Juntar todas a</label>
+                <select name="target" id="theme-target">
+                    {% if theme.label in existing %}
+                    <option value="{{ theme.label }}">«{{ theme.label }}» (junta as que faltam)</option>
+                    {% else %}
+                    <option value="">Nova playlist «{{ theme.label }}»</option>
+                    {% endif %}
+                    {% for pl in playlists if pl.name != theme.label %}
+                    <option value="{{ pl.name }}">«{{ pl.name }}»{% if pl.name == active %} (a tocar){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <button class="btn-green">Juntar {{ theme.results|length }} rádios</button>
+            </form>
+            <hr>
+            <p class="meta">Ou junta só algumas{% if active %} a «{{ active }}»{% endif %}:</p>
+            {% endif %}
+            {% for r in theme.results %}
+            <div class="result">
+                <span class="thumb{% if r.favicon %} has-img" style="background-image: url('{{ r.favicon }}'){% endif %}"></span>
+                <div class="result-body">
+                    {% if r.url_resolved in queue_urls %}
+                        <button class="result-btn" disabled>✓ {{ r.name }}</button>
+                    {% else %}
+                    <form action="/add_stream" method="post">
+                        <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                        <input type="hidden" name="name" value="{{ r.name }}">
+                        <input type="hidden" name="logo" value="{{ r.favicon }}">
+                        <input type="hidden" name="next" value="{{ request.full_path }}#tema">
+                        <button class="result-btn">+ {{ r.name }}</button>
+                    </form>
+                    {% endif %}
+                    <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}</div>
+                </div>
+            </div>
+            {% else %}
+            <p>Não há rádios neste tema{% if only_pt %} em Portugal. Experimenta sem «Só rádios portuguesas»{% endif %}.</p>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="modal" id="juntar">
         <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
         <div class="modal-box">
@@ -125,17 +213,24 @@
             </form>
             {% if results is not none %}
                 {% for r in results %}
-                    {% if r.url_resolved in queue_urls %}
-                        <button class="result-btn" disabled>✓ {{ r.name }}</button>
-                    {% else %}
-                    <form action="/add_stream" method="post">
-                        <input type="hidden" name="url" value="{{ r.url_resolved }}">
-                        <input type="hidden" name="name" value="{{ r.name }}">
-                        <input type="hidden" name="next" value="{{ request.full_path }}#juntar">
-                        <button class="result-btn">+ {{ r.name }}</button>
-                    </form>
-                    {% endif %}
-                    <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
+                <div class="result">
+                    {# O favicon vem direto do radio-browser; se não carregar, fica só o quadrado #}
+                    <span class="thumb{% if r.favicon %} has-img" style="background-image: url('{{ r.favicon }}'){% endif %}"></span>
+                    <div class="result-body">
+                        {% if r.url_resolved in queue_urls %}
+                            <button class="result-btn" disabled>✓ {{ r.name }}</button>
+                        {% else %}
+                        <form action="/add_stream" method="post">
+                            <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                            <input type="hidden" name="name" value="{{ r.name }}">
+                            <input type="hidden" name="logo" value="{{ r.favicon }}">
+                            <input type="hidden" name="next" value="{{ request.full_path }}#juntar">
+                            <button class="result-btn">+ {{ r.name }}</button>
+                        </form>
+                        {% endif %}
+                        <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
+                    </div>
+                </div>
                 {% else %}
                     <p>Nenhuma rádio encontrada.</p>
                 {% endfor %}

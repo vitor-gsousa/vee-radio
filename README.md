@@ -10,7 +10,6 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `radio_web.py` | Comando web na porta `8080`: tocar, parar, volume, gerir as estações e as playlists |
 | `templates/` | Páginas do comando web; no telemóvel ficam numa coluna e no PC em duas |
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
-| `radios.m3u` | Lista inicial de rádios portuguesas |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
 | `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
@@ -32,7 +31,7 @@ O `install.sh`:
 1. Instala os pacotes (`mpd`, `mpc`, `python`, `git`, `ffmpeg`, `cloudflared`) e as bibliotecas Python (`flask`, `python-mpd2`)
 2. Pede acesso ao armazenamento. Aceita o pedido do Android quando aparecer.
 3. Clona o repositório para `~/vee-radio`
-4. Liga `~/.config/mpd/mpd.conf` ao `mpd.conf` do repositório e copia o `radios.m3u` para as playlists, se ainda não existir
+4. Liga `~/.config/mpd/mpd.conf` ao `mpd.conf` do repositório
 5. Cria os atalhos `~/start.sh` e `~/stop.sh`
 6. Cria o script de arranque automático para o Termux:Boot
 
@@ -49,7 +48,7 @@ Variáveis opcionais:
 ~/start.sh
 ```
 
-Ativa o wake lock do Android, inicia o MPD, carrega a playlist `radios` se a fila estiver vazia, e arranca o servidor web e o Cloudflare Tunnel em segundo plano. Depois disso já podes fechar o Termux.
+Ativa o wake lock do Android, inicia o MPD, volta a carregar a última playlist ativa se a fila estiver vazia, e arranca o servidor web e o Cloudflare Tunnel em segundo plano. Depois disso já podes fechar o Termux.
 
 Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux, fica em `~/tunnel-url.txt` e é mostrado no fundo do comando web. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
 
@@ -86,17 +85,12 @@ mv ~/vee-radio ~/vee-radio.antigo
 curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.sh | bash
 ```
 
-Alterações ao `radios.m3u` não substituem a playlist já instalada. Para repor a lista do repositório:
-
-```bash
-cp ~/vee-radio/radios.m3u ~/.config/mpd/playlists/
-```
-
 ## Comando web
 
 - **A Tocar Agora**: estação e faixa atuais, tocar ou parar, volume (±5%)
 - **Estações**: a lista de rádios da playlist ativa, cujo nome aparece no topo. Toca-se numa estação para a ouvir e o ✕ remove-a.
 - **Juntar rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, com opção de mostrar só rádios portuguesas, ou colar o URL de um stream com um nome opcional
+- **Temas**: escolher um tema (Notícias, Jazz, Fado, Anos 80...), com opção de mostrar só rádios portuguesas, e juntar as rádios mais ouvidas desse tema a uma playlist nova ou já existente, todas de uma vez ou uma a uma
 - **Playlists**: trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists
 
 Os formulários abrem em janelas por cima da página, sem JavaScript.
@@ -104,6 +98,14 @@ Os formulários abrem em janelas por cima da página, sem JavaScript.
 A lista de estações é sempre a playlist ativa: juntar ou remover uma rádio guarda logo a alteração nessa playlist, sem botão de guardar. Para ter uma lista de favoritas, cria uma playlist nova com as estações atuais e remove as que não queres, ou cria-a vazia e junta as rádios uma a uma. Ao apagar a playlist ativa, as estações continuam a tocar mas deixam de estar guardadas, e a página oferece guardá-las com outro nome. A playlist ativa fica em `~/.config/mpd/playlist-ativa.txt`.
 
 Os nomes das estações vêm das linhas `#EXTINF` das playlists. Os nomes dados ao juntar um stream ficam também em `~/.config/mpd/nomes.m3u`.
+
+Cada estação aparece num cartão com o seu logótipo:
+
+- **De onde vem:** do atributo `tvg-logo` do `#EXTINF`, por exemplo `#EXTINF:-1 tvg-logo="https://.../logo.png",Antena 1`.
+  - As rádios encontradas na pesquisa ou nos temas trazem-no do radio-browser.info.
+  - Para as outras, o comando procura o URL do stream no radio-browser.info.
+- **Onde fica guardado:** o telemóvel descarrega cada logótipo uma vez e guarda-o em `~/.cache/vee-radio/logos`.
+- **Sem logótipo:** o cartão mostra as iniciais da rádio. Para voltar a descarregar os logótipos, apaga essa pasta.
 
 ## Resolução de problemas
 

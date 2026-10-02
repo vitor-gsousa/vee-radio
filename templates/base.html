@@ -20,6 +20,10 @@
         .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
         .row > :first-child { flex: 1; min-width: 0; }
         .row button, .row .btn { margin: 0; }
+        .row > .btn { flex: 1; }
+        /* Parar/Tocar ocupa o dobro de cada botão de volume; sem ele, o volume divide a linha */
+        .controls > form { flex: 1; }
+        .controls > .grow { flex: 2; }
         .small { width: auto; padding: 12px 14px; }
         .del { background: #f38ba8; color: #11111b; font-size: 12px; }
         .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -40,12 +44,51 @@
         .close { position: absolute; top: 8px; right: 8px; width: 36px; height: 36px; line-height: 36px; padding: 0; margin: 0; border-radius: 18px; }
         hr { border: none; border-top: 1px solid #313244; margin: 16px 0; }
 
-        /* PC: "A Tocar Agora" fixo à esquerda, estações em grelha à direita */
+        /* A tocar agora: logótipo grande ao lado do nome e da faixa */
+        .now { display: flex; gap: 14px; align-items: center; margin: 12px 0; }
+        .now-logo { width: 88px; height: 88px; flex: none; border-radius: 12px; object-fit: contain; background: #fff; }
+        .now-logo.empty { background: #313244; display: flex; align-items: center; justify-content: center; font-size: 36px; }
+        .now-info { min-width: 0; }
+        .now-station { font-size: 20px; font-weight: bold; overflow-wrap: anywhere; }
+        .now-title { font-size: 14px; color: #bac2de; margin-top: 4px; overflow-wrap: anywhere; }
+        .now-info .meta { margin: 6px 0 0 0; }
+
+        /* Estações em cartões com logótipo; sem logótipo, o servidor devolve as iniciais */
+        .stations { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-bottom: 12px; }
+        .stations .empty { grid-column: 1 / -1; }
+        .tile { position: relative; }
+        .tile form { height: 100%; }
+        .tile-play { height: 100%; margin: 0; padding: 8px; display: flex; flex-direction: column; gap: 8px; border-radius: 12px; transition: transform 0.1s, background 0.1s; }
+        .tile-play:hover { transform: translateY(-2px); }
+        .tile-play img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border-radius: 8px; }
+        .tile-name { font-size: 13px; line-height: 1.25; min-height: 2.5em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+        .tile.current .tile-play { background: #45475a; outline: 3px solid #a6e3a1; }
+        .badge { position: absolute; left: 12px; top: 12px; background: #a6e3a1; color: #11111b; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 6px; pointer-events: none; }
+        .badge-text { display: none; }
+        .tile-del { position: absolute; top: 4px; right: 4px; height: auto !important; }
+        .tile-del button { width: 28px; height: 28px; padding: 0; margin: 0; border-radius: 14px; font-size: 13px; background: rgba(17, 17, 27, 0.8); color: #f38ba8; }
+        .tile-del button:hover { background: #f38ba8; color: #11111b; }
+
+        /* Resultados da pesquisa com o favicon da rádio */
+        .result { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; }
+        .thumb { width: 46px; height: 46px; flex: none; margin-top: 6px; border-radius: 8px; background: #313244 center / contain no-repeat; }
+        .thumb.has-img { background-color: #fff; }
+        .result-body { flex: 1; min-width: 0; }
+
+        /* Temas */
+        .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .chips button { width: auto; margin: 0; padding: 8px 14px; font-size: 14px; border-radius: 18px; }
+        select { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
+        .theme-add label { display: block; margin: 8px 0 0 4px; }
+
+        /* PC: "A Tocar Agora" fixo à esquerda, estações em cartões maiores à direita */
         @media (min-width: 900px) {
             body { max-width: 1100px; padding: 30px; }
             .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
             .side { position: sticky; top: 20px; }
-            .stations { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 10px; }
+            .stations { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
+            .tile-name { font-size: 14px; }
+            .badge-text { display: inline; }
             .modal-box { max-width: 560px; padding: 20px; }
         }
     </style>

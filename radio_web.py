@@ -1,12 +1,14 @@
+import hashlib
 import html
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 
-from flask import Flask, render_template, request, redirect
+from flask import Flask, Response, render_template, request, redirect
 from mpd import MPDClient, MPDError
 
 app = Flask(__name__)
@@ -15,12 +17,38 @@ app = Flask(__name__)
 PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
 # Nomes dados a streams adicionados pela web, ainda que não estejam em nenhuma playlist
 NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
-# Playlist que está carregada na fila; o start.sh escreve "radios" quando a carrega
+# Playlist que está carregada na fila; o start.sh volta a carregá-la se a fila estiver vazia
 ACTIVE_FILE = os.path.expanduser("~/.config/mpd/playlist-ativa.txt")
 # Escrito pelo start.sh com o link do Cloudflare Tunnel
 TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
+# Logótipos descarregados, um ficheiro por stream
+LOGO_DIR = os.path.expanduser("~/.cache/vee-radio/logos")
+# Só URLs simples: o logótipo vai entre aspas no #EXTINF e num url() de CSS
+LOGO_URL_RE = re.compile(r"^https?://[^\s\"',()\\]+$")
+LOGO_MAX_BYTES = 512 * 1024
+# Depois de uma falha, só volta a tentar descarregar o logótipo passado um dia
+LOGO_RETRY_SECONDS = 24 * 3600
+# Cores das iniciais quando a rádio não tem logótipo
+TILE_COLORS = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#94e2d5", "#89dceb", "#89b4fa", "#cba6f7", "#f5c2e7"]
 
-STREAM_FAILED_HINT = 'O endereço pode ter mudado. Procura a rádio outra vez em "Juntar rádio" e remove a antiga.'
+# Temas: etiquetas (tags) do radio-browser.info com nome em português. A lista é
+# fixa porque as etiquetas mais usadas na API estão em várias línguas e misturam
+# géneros com países ("méxico", "fm", "radio")
+THEMES = [
+    ("news", "Notícias"), ("talk", "Conversa"), ("sports", "Desporto"),
+    ("pop", "Pop"), ("hits", "Êxitos"), ("rock", "Rock"), ("metal", "Metal"), ("indie", "Indie"),
+    ("dance", "Dança"), ("house", "House"), ("electronic", "Eletrónica"), ("hip hop", "Hip-Hop"),
+    ("jazz", "Jazz"), ("blues", "Blues"), ("soul", "Soul"), ("reggae", "Reggae"), ("latin", "Latina"),
+    ("chillout", "Chillout"), ("lounge", "Lounge"), ("ambient", "Ambiente"), ("classical", "Clássica"),
+    ("70s", "Anos 70"), ("80s", "Anos 80"), ("90s", "Anos 90"), ("oldies", "Clássicos"),
+    ("fado", "Fado"), ("portuguese", "Música portuguesa"), ("folk", "Folk"), ("country", "Country"),
+    ("kids", "Infantil"),
+]
+THEME_LABELS = dict(THEMES)
+# Quantas rádios de um tema se mostram e se juntam de uma vez (as mais ouvidas)
+THEME_LIMIT = 15
+
+STREAM_FAILED_HINT ='O endereço pode ter mudado. Procura a rádio outra vez em "Juntar rádio" e remove a antiga.'
 
 STATES = {"play": "A tocar", "pause": "Em pausa", "stop": "Parado"}
 
@@ -40,10 +68,14 @@ def mpd_client():
 
 # Os nomes das estações vêm dos #EXTINF dos ficheiros .m3u e não das tags do MPD:
 # quando um stream toca, o MPD substitui as tags dessa entrada da fila pelas do
-# stream (ICY) e o nome original perde-se.
+# stream (ICY) e o nome original perde-se. O logótipo vai no atributo tvg-logo,
+# como nas listas de IPTV: #EXTINF:-1 tvg-logo="https://...",Nome
+EXTINF_RE = re.compile(r'#EXTINF:((?:[^,"]|"[^"]*")*),?(.*)')
+
 def read_m3u(path):
+    # Lista de (url, nome, logótipo)
     entries = []
-    name = None
+    name = logo = None
     try:
         f = open(path, encoding="utf-8", errors="replace")
     except FileNotFoundError:
@@ -52,18 +84,25 @@ def read_m3u(path):
         for line in f:
             line = line.strip()
             if line.startswith("#EXTINF:"):
-                name = line.split(",", 1)[1].strip() if "," in line else None
+                m = EXTINF_RE.match(line)
+                attr = re.search(r'tvg-logo="([^"]*)"', m.group(1))
+                name = m.group(2).strip() or None
+                logo = attr.group(1) if attr and LOGO_URL_RE.match(attr.group(1)) else None
             elif line and not line.startswith("#"):
-                entries.append((line, name))
-                name = None
+                entries.append((line, name, logo))
+                name = logo = None
     return entries
+
+def extinf(name, logo):
+    attrs = f' tvg-logo="{logo}"' if logo else ""
+    return f"#EXTINF:-1{attrs},{name or ''}\n"
 
 def write_m3u(path, entries):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("#EXTM3U\n")
-        for url, name in entries:
-            if name:
-                f.write(f"#EXTINF:-1,{name}\n")
+        for url, name, logo in entries:
+            if name or logo:
+                f.write(extinf(name, logo))
             f.write(url + "\n")
 
 def playlist_path(name):
@@ -89,17 +128,60 @@ def clean_title(title):
     # Sem artista, o DB_DALET_TITLE_NAME costuma ser o slogan da rádio
     return f"{artist} - {song}" if artist and song else ""
 
-def station_names():
-    # URL -> nome, juntando todas as playlists guardadas e o ficheiro de nomes
+def station_info():
+    # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
+    # nomes; cada ficheiro sobrepõe-se aos anteriores
     paths = []
     if os.path.isdir(PLAYLIST_DIR):
-        paths = [os.path.join(PLAYLIST_DIR, f) for f in sorted(os.listdir(PLAYLIST_DIR)) if f.endswith(".m3u")]
-    names = {}
+        paths += [os.path.join(PLAYLIST_DIR, f) for f in sorted(os.listdir(PLAYLIST_DIR)) if f.endswith(".m3u")]
+    info = {}
     for path in paths + [NAMES_FILE]:
-        for url, name in read_m3u(path):
+        for url, name, logo in read_m3u(path):
+            entry = info.setdefault(url, {"name": None, "logo": None})
             if name:
-                names[url] = name
-    return names
+                entry["name"] = name
+            if logo:
+                entry["logo"] = logo
+    return info
+
+def logo_key(url):
+    return hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
+
+def image_type(data):
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"GIF8"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data.startswith(b"\x00\x00\x01\x00"):
+        return "image/x-icon"
+    if b"<svg" in data[:1024]:
+        return "image/svg+xml"
+    return None
+
+def fetch(url, limit):
+    req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return r.read(limit + 1)
+
+def lookup_logo(stream_url):
+    # Só procura pelo URL exato do stream: pelo nome aparecem rádios de outros países
+    url = "https://all.api.radio-browser.info/json/stations/byurl?" + urllib.parse.urlencode({"url": stream_url})
+    for s in json.loads(fetch(url, 1024 * 1024)):
+        if LOGO_URL_RE.match(s.get("favicon") or ""):
+            return s["favicon"]
+    return None
+
+def initials_svg(name):
+    words = re.findall(r"\w+", name or "")
+    text = "".join(w[0] for w in words[:2]).upper() or "?"
+    color = TILE_COLORS[int(hashlib.sha1((name or "").encode("utf-8")).hexdigest(), 16) % len(TILE_COLORS)]
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="{color}"/>'
+            f'<text x="50" y="50" dy=".35em" text-anchor="middle" font-family="sans-serif" font-weight="bold" '
+            f'font-size="{40 if len(text) > 1 else 50}" fill="#11111b">{html.escape(text)}</text></svg>')
 
 # A fila do MPD é sempre a playlist ativa: juntar ou remover uma estação na
 # página reescreve o ficheiro dessa playlist. Sem playlist ativa (por exemplo,
@@ -122,8 +204,12 @@ def set_active(name):
 
 def queue_entries(c):
     # O save do MPD só escreve os URLs, por isso as playlists são escritas aqui para manter os nomes
-    names = station_names()
-    return [(s["file"], names.get(s["file"]) or s.get("name")) for s in c.playlistinfo()]
+    info = station_info()
+    entries = []
+    for s in c.playlistinfo():
+        known = info.get(s["file"], {})
+        entries.append((s["file"], known.get("name") or s.get("name"), known.get("logo")))
+    return entries
 
 def sync_active(c):
     name = active_playlist()
@@ -144,18 +230,21 @@ def mpd_failed(e):
         return error_page("Esta rádio não está a responder", f"{STREAM_FAILED_HINT} ({e})", 502)
     return error_page("Erro do MPD", str(e), 500)
 
-def render_index(results=None, query="", only_pt=False):
+def render_index(results=None, query="", only_pt=False, theme=None):
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
         queue = c.playlistinfo()
         stored_playlists = sorted(p['playlist'] for p in c.listplaylists())
 
-    names = station_names()
-    stations = [{"pos": s["pos"], "name": names.get(s["file"]) or s.get("name") or s.get("title") or s["file"],
+    info = station_info()
+    def display_name(song):
+        return info.get(song["file"], {}).get("name") or song.get("name") or song.get("title") or song["file"]
+    stations = [{"pos": s["pos"], "name": display_name(s), "key": logo_key(s["file"]),
                  "current": status.get("state") != "stop" and s.get("id") == current.get("id")} for s in queue]
     playlists = [{"name": p, "count": len(read_m3u(playlist_path(p) or ""))} for p in stored_playlists]
-    current_station = names.get(current.get('file')) or current.get('name') or current.get('file', '')
+    current_station = display_name(current) if current.get("file") else ""
+    current_key = logo_key(current["file"]) if current.get("file") else ""
     current_title = clean_title(current.get('title', ''))
     try:
         with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
@@ -163,19 +252,70 @@ def render_index(results=None, query="", only_pt=False):
     except FileNotFoundError:
         public_url = ""
     return render_template("index.html", status=status, state=STATES.get(status.get("state"), status.get("state")),
-                                  current_station=current_station, current_title=current_title,
+                                  current_station=current_station, current_title=current_title, current_key=current_key,
                                   stations=stations, queue_urls={s["file"] for s in queue},
                                   playlists=playlists, active=active_playlist(),
                                   results=results, query=query, only_pt=only_pt, public_url=public_url,
-                                  hint=STREAM_FAILED_HINT)
+                                  themes=THEMES, theme=theme, hint=STREAM_FAILED_HINT)
 
 @app.route("/")
 def index():
     return render_index()
 
-def search_stations(query, only_pt):
-    # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo
-    params = {"name": query, "limit": 25, "hidebroken": "true", "order": "clickcount", "reverse": "true"}
+@app.route("/logo/<key>")
+def logo(key):
+    # Descarrega o logótipo uma vez e guarda-o no telemóvel. Só procura streams que
+    # já estão nas playlists ou na fila, para o link público não servir para pôr
+    # o telemóvel a pedir endereços quaisquer. Sem logótipo, mostra as iniciais.
+    name = request.args.get("n", "")
+    if not re.fullmatch(r"[0-9a-f]{16}", key):
+        return initials_response(name)
+    path = os.path.join(LOGO_DIR, key)
+    try:
+        with open(path, "rb") as f:
+            return image_response(f.read())
+    except FileNotFoundError:
+        pass
+    failed = path + ".falhou"
+    if os.path.exists(failed) and time.time() - os.path.getmtime(failed) < LOGO_RETRY_SECONDS:
+        return initials_response(name)
+    info = station_info()
+    stream_url = next((u for u in info if logo_key(u) == key), None)
+    if stream_url is None:
+        with mpd_client() as c:
+            stream_url = next((s["file"] for s in c.playlistinfo() if logo_key(s["file"]) == key), None)
+    if stream_url is None:
+        return initials_response(name)
+    os.makedirs(LOGO_DIR, exist_ok=True)
+    try:
+        logo_url = info.get(stream_url, {}).get("logo") or lookup_logo(stream_url)
+        data = fetch(logo_url, LOGO_MAX_BYTES) if logo_url else b""
+    except (OSError, ValueError):
+        data = b""
+    if len(data) > LOGO_MAX_BYTES or not image_type(data):
+        open(failed, "w").close()
+        return initials_response(name)
+    with open(path, "wb") as f:
+        f.write(data)
+    return image_response(data)
+
+def image_response(data):
+    r = Response(data, mimetype=image_type(data) or "application/octet-stream")
+    r.headers["Cache-Control"] = "public, max-age=86400"
+    # Um SVG de fora aberto diretamente não pode correr scripts nesta origem
+    r.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'"
+    r.headers["X-Content-Type-Options"] = "nosniff"
+    return r
+
+def initials_response(name):
+    r = Response(initials_svg(name), mimetype="image/svg+xml")
+    r.headers["Cache-Control"] = "public, max-age=3600"
+    return r
+
+def find_stations(only_pt, limit, **criteria):
+    # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
+    # Pede mais do que o limite porque os repetidos e os HLS ficam de fora.
+    params = {"limit": limit * 2, "hidebroken": "true", "order": "clickcount", "reverse": "true", **criteria}
     if only_pt:
         params["countrycode"] = "PT"
     url = "https://all.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
@@ -191,8 +331,13 @@ def search_stations(query, only_pt):
             continue
         if s.get("url_resolved") and s["url_resolved"] not in seen:
             seen.add(s["url_resolved"])
+            if not LOGO_URL_RE.match(s.get("favicon") or ""):
+                s["favicon"] = ""
+            s["name"] = " ".join(s.get("name", "").split())
             results.append(s)
-    return results
+    return results[:limit]
+
+API_DOWN = ("Pesquisa indisponível", "Não foi possível contactar o radio-browser.info. Tenta outra vez.", 502)
 
 @app.route("/search")
 def search():
@@ -201,11 +346,59 @@ def search():
     if not query:
         return redirect("/#juntar")
     try:
-        results = search_stations(query, only_pt)
+        results = find_stations(only_pt, 25, name=query)
     except (OSError, ValueError):
         # Apanhado aqui para não cair no handler de OSError, que culpa o MPD
-        return error_page("Pesquisa indisponível", "Não foi possível contactar o radio-browser.info. Tenta outra vez.", 502)
+        return error_page(*API_DOWN)
     return render_index(results, query, only_pt)
+
+@app.route("/tema")
+def theme():
+    tag = request.args.get("t", "")
+    only_pt = request.args.get("pt") == "1"
+    if tag not in THEME_LABELS:
+        return redirect("/#temas")
+    try:
+        results = find_stations(only_pt, THEME_LIMIT, tag=tag, tagExact="true")
+    except (OSError, ValueError):
+        return error_page(*API_DOWN)
+    return render_index(only_pt=only_pt, theme={"tag": tag, "label": THEME_LABELS[tag], "results": results})
+
+@app.route("/add_theme", methods=["POST"])
+def add_theme():
+    # Junta as rádios mostradas de um tema a uma playlist. Os URLs vêm do formulário
+    # (o que a pessoa viu) em vez de se pedir outra vez a lista à API.
+    label = request.form.get("label", "").strip()
+    target = request.form.get("target", "").strip() or label
+    path = playlist_path(target)
+    if path is None:
+        return error_page("Nome inválido", "O nome da playlist não pode ter / nem \\ nem começar por ponto.", 400)
+    logos = [l if LOGO_URL_RE.match(l) else None for l in request.form.getlist("logo")]
+    picked = list(zip(request.form.getlist("url"), request.form.getlist("name"), logos))
+    existed = os.path.isfile(path)
+    entries = read_m3u(path)
+    known = {u for u, _, _ in entries}
+    new = [(u, " ".join(n.split()) or None, l) for u, n, l in picked if u and u not in known]
+    with mpd_client() as c:
+        if target == active_playlist():
+            # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
+            # antes para a sincronização encontrar os nomes e logótipos das novas.
+            for url, _, _ in new:
+                c.add(url)
+            write_m3u(path, entries + new)
+            sync_active(c)
+            return redirect("/")
+        os.makedirs(PLAYLIST_DIR, exist_ok=True)
+        write_m3u(path, entries + new)
+        if existed:
+            return redirect("/#playlists")
+        # Playlist nova: passa a ser a da página principal, como em "Nova playlist"
+        c.clear()
+        c.load(target)
+        if new:
+            c.play(0)
+    set_active(target)
+    return redirect("/")
 
 @app.route("/play_pos/<int:pos>", methods=["POST"])
 def play_pos(pos):
@@ -242,11 +435,20 @@ def add_stream():
     url = request.form.get("url", "").strip()
     # Junta espaços e quebras de linha para o nome não partir o formato m3u
     name = " ".join(request.form.get("name", "").split())
+    logo = request.form.get("logo", "").strip()
+    if not LOGO_URL_RE.match(logo):
+        logo = ""
     if url:
         # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele
-        if name:
+        if name or logo:
             with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
-                f.write(f"#EXTINF:-1,{name}\n{url}\n")
+                f.write(extinf(name, logo) + url + "\n")
+        if logo:
+            # Pode ter falhado antes, sem logótipo; agora há um para tentar
+            try:
+                os.remove(os.path.join(LOGO_DIR, logo_key(url) + ".falhou"))
+            except FileNotFoundError:
+                pass
         with mpd_client() as c:
             c.add(url)
             sync_active(c)

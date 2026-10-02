@@ -46,8 +46,6 @@ main() {
         echo "mpd.conf anterior guardado em ~/.config/mpd/mpd.conf.bak"
     fi
     ln -sf "$INSTALL_DIR/mpd.conf" ~/.config/mpd/mpd.conf
-    # Não sobrescreve a lista se já existir (pode ter sido alterada pelo comando web)
-    cp -n "$INSTALL_DIR/radios.m3u" ~/.config/mpd/playlists/radios.m3u
 
     echo "=== 6. A criar atalhos na pasta pessoal ==="
     ln -sf "$INSTALL_DIR/start.sh" ~/start.sh

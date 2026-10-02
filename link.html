@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Link do Comando Rádio</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; }
+        h2 { color: #89b4fa; }
+        .link { width: 100%; padding: 14px; box-sizing: border-box; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 15px; text-align: center; }
+        button { display: block; width: 100%; margin: 12px 0; padding: 16px; font-size: 18px; border-radius: 8px; border: none; font-weight: bold; cursor: pointer; }
+        .copy { background: #a6e3a1; color: #11111b; }
+        .share { background: #89b4fa; color: #11111b; }
+        #msg { min-height: 1.5em; color: #a6e3a1; }
+        .note { font-size: 13px; color: #a6adc8; }
+    </style>
+</head>
+<body>
+    <h2>Comando da Rádio</h2>
+    <p>Envia este link a quem quiseres que controle a rádio:</p>
+    <input class="link" id="link" type="text" value="__URL__" readonly onclick="this.select()">
+    <button class="copy" onclick="copiar()">Copiar link</button>
+    <button class="share" id="share" onclick="partilhar()" hidden>Partilhar…</button>
+    <p id="msg"></p>
+    <p class="note">O link muda sempre que a rádio é reiniciada. Quem tiver o link consegue controlar a rádio.</p>
+    <script>
+        var link = document.getElementById("link");
+        var msg = document.getElementById("msg");
+        if (navigator.share) document.getElementById("share").hidden = false;
+
+        function copiar() {
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(link.value).then(copiado, copiarAntigo);
+            } else {
+                copiarAntigo();
+            }
+        }
+        function copiarAntigo() {
+            link.select();
+            try { document.execCommand("copy"); copiado(); }
+            catch (e) { msg.textContent = "Não foi possível copiar. Seleciona o link e copia à mão."; }
+        }
+        function copiado() { msg.textContent = "Link copiado!"; }
+        function partilhar() {
+            navigator.share({ title: "Comando da Rádio", url: link.value }).catch(function () {});
+        }
+    </script>
+</body>
+</html>

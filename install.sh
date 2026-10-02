@@ -39,7 +39,6 @@ main() {
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
     chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh"
-
     echo "=== 5. A configurar o MPD ==="
     mkdir -p ~/.config/mpd/playlists
     if [ -f ~/.config/mpd/mpd.conf ] && [ ! -L ~/.config/mpd/mpd.conf ]; then
@@ -54,9 +53,24 @@ main() {
     ln -sf "$INSTALL_DIR/start.sh" ~/start.sh
     ln -sf "$INSTALL_DIR/stop.sh" ~/stop.sh
 
+    echo "=== 7. A configurar o arranque automático (Termux:Boot) ==="
+    mkdir -p ~/.termux/boot
+    cat > ~/.termux/boot/vee-radio <<'BOOT'
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock
+# No arranque do telemóvel a rede pode demorar; espera até 2 minutos pela internet
+for _ in $(seq 1 24); do
+    curl -s -o /dev/null --max-time 5 https://www.cloudflare.com && break
+    sleep 5
+done
+~/start.sh > ~/boot.log 2>&1
+BOOT
+    chmod +x ~/.termux/boot/vee-radio
+
     echo ""
     echo "=== Instalação concluída! ==="
     echo "Para arrancar a jukebox: ~/start.sh"
+    echo "Para arrancar sozinha quando o telemóvel liga, instala a app Termux:Boot (F-Droid) e abre-a uma vez."
 }
 
 main "$@"

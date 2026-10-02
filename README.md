@@ -32,6 +32,7 @@ O `install.sh`:
 3. Clona o repositório para `~/vee-radio`
 4. Liga `~/.config/mpd/mpd.conf` ao `mpd.conf` do repositório e copia o `radios.m3u` para as playlists, se ainda não existir
 5. Cria os atalhos `~/start.sh` e `~/stop.sh`
+6. Cria o script de arranque automático para o Termux:Boot
 
 Pode correr-se mais vezes sem estragar nada: atualiza o código e mantém as playlists guardadas.
 
@@ -46,7 +47,15 @@ Variáveis opcionais:
 ~/start.sh
 ```
 
-Ativa o wake lock do Android, inicia o MPD, carrega a playlist `radios` se a fila estiver vazia, arranca o servidor web em segundo plano e abre o Cloudflare Tunnel. O link `https://*.trycloudflare.com` aparece no ecrã. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
+Ativa o wake lock do Android, inicia o MPD, carrega a playlist `radios` se a fila estiver vazia, e arranca o servidor web e o Cloudflare Tunnel em segundo plano. Depois disso já podes fechar o Termux.
+
+Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux, fica em `~/tunnel-url.txt` e é mostrado no fundo do comando web. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
+
+O link muda sempre que o `start.sh` corre. Se o túnel não arrancar, vê o `~/tunnel.log`.
+
+### Arranque automático
+
+Instala a app [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) do F-Droid e abre-a uma vez. A partir daí, quando o telemóvel liga, a rádio arranca sozinha: espera até 2 minutos pela internet e corre o `~/start.sh`. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o arranque fica registado em `~/boot.log`.
 
 ```bash
 ~/stop.sh

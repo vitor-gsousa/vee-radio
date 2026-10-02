@@ -13,6 +13,8 @@ app = Flask(__name__)
 PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
 # Nomes dados a streams adicionados pela web, ainda que não estejam em nenhuma playlist
 NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
+# Escrito pelo start.sh com o link do Cloudflare Tunnel
+TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
 
 HTML = """
 <!DOCTYPE html>
@@ -120,6 +122,10 @@ HTML = """
             <button type="submit" class="btn-green">Guardar Playlist</button>
         </form>
     </div>
+
+    {% if public_url %}
+    <p class="meta" style="text-align: center;">Link público: <a href="{{ public_url }}" style="color: #89b4fa;">{{ public_url }}</a></p>
+    {% endif %}
 </body>
 </html>
 """
@@ -220,9 +226,14 @@ def render_index(results=None, query="", only_pt=False):
     names = station_names()
     current_station = names.get(current.get('file')) or current.get('name') or current.get('file', '')
     current_title = current.get('title', '')
+    try:
+        with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
+            public_url = f.read().strip()
+    except FileNotFoundError:
+        public_url = ""
     return render_template_string(HTML, status=status, current_station=current_station, current_title=current_title,
                                   queue=queue, playlists=stored_playlists, names=names,
-                                  results=results, query=query, only_pt=only_pt)
+                                  results=results, query=query, only_pt=only_pt, public_url=public_url)
 
 @app.route("/")
 def index():

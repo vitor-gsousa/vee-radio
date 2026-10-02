@@ -8,6 +8,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | --- | --- |
 | `install.sh` | Instala as dependências, obtém o código e configura tudo |
 | `radio_web.py` | Comando web na porta `8080`: tocar, parar, volume, gerir as estações e as playlists |
+| `templates/` | Páginas do comando web; no telemóvel ficam numa coluna e no PC em duas |
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `radios.m3u` | Lista inicial de rádios portuguesas |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |

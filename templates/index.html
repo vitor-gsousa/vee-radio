@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{# As janelas (modais) abrem com :target, sem JavaScript: um link para #juntar
+   mostra a div com esse id e um link para #fechar esconde-a. Assim também abrem
+   depois de um redirect, como /search?q=...#juntar. #}
+{% block body %}
+    <h2>Comando de Áudio</h2>
+
+    <div class="layout">
+    <div class="side">
+    <div class="card">
+        <h3>A Tocar Agora</h3>
+        <p><strong>Estação:</strong> {{ current_station or '—' }}</p>
+        {% if current_title %}<p><strong>Faixa:</strong> {{ current_title }}</p>{% endif %}
+        <p class="meta">{{ state }}{% if status.volume and status.volume != '-1' %} · Volume {{ status.volume }}%{% endif %}</p>
+        {% if status.error %}
+        <div class="warn">
+            <strong>A última rádio não tocou.</strong> {{ hint }}
+            <div class="meta">{{ status.error }}</div>
+        </div>
+        {% endif %}
+        <div class="row">
+            {% if status.state == 'play' %}
+            <form action="/stop" method="post"><button class="stop">Parar</button></form>
+            {% elif stations %}
+            <form action="/play" method="post"><button class="btn-green">Tocar</button></form>
+            {% endif %}
+            <form action="/voldown" method="post"><button class="vol small">− Vol</button></form>
+            <form action="/volup" method="post"><button class="vol small">+ Vol</button></form>
+        </div>
+    </div>
+    </div>
+
+    <div class="card">
+        <div class="card-head">
+            <div>
+                <h3>{{ active or 'Estações' }}</h3>
+                <div class="meta">{% if active %}Playlist · as alterações ficam guardadas{% else %}Estas estações não estão guardadas{% endif %}</div>
+            </div>
+            <a class="btn" href="#playlists">Playlists</a>
+        </div>
+        <div class="stations">
+        {% for s in stations %}
+            <div class="row">
+                <form action="/play_pos/{{ s.pos }}" method="post">
+                    <button class="station{% if s.current %} playing{% endif %}">{% if s.current %}▶ {% endif %}{{ s.name }}</button>
+                </form>
+                <form action="/remove/{{ s.pos }}" method="post"><button class="del small" title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
+            </div>
+        {% else %}
+            <p class="meta">Ainda não há estações. Junta uma rádio para começar.</p>
+        {% endfor %}
+        </div>
+        <a class="btn btn-green" href="#juntar">+ Juntar rádio</a>
+        {% if not active and stations %}
+            <a class="btn" href="#nova">Guardar como playlist</a>
+        {% endif %}
+    </div>
+    </div>
+
+    {% if public_url %}
+    <p class="meta" style="text-align: center;">Link público: <a href="{{ public_url }}">{{ public_url }}</a></p>
+    {% endif %}
+
+    <div class="modal" id="playlists">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>Playlists</h3>
+            <p class="meta">Escolher uma playlist troca as estações da página principal.</p>
+            {% for pl in playlists %}
+                <div class="row">
+                    <form action="/load_playlist" method="post">
+                        <input type="hidden" name="playlist_name" value="{{ pl.name }}">
+                        <button class="station{% if pl.name == active %} playing{% endif %}">{% if pl.name == active %}✓ {% endif %}{{ pl.name }} <span class="meta">({{ pl.count }})</span></button>
+                    </form>
+                    <a class="btn del small" href="#apagar-{{ loop.index }}" aria-label="Apagar {{ pl.name }}">🗑</a>
+                </div>
+            {% else %}
+                <p class="meta">Ainda não há playlists.</p>
+            {% endfor %}
+            <a class="btn btn-blue" href="#nova">+ Nova playlist</a>
+        </div>
+    </div>
+
+    {% for pl in playlists %}
+    <div class="modal" id="apagar-{{ loop.index }}">
+        <a class="backdrop" href="#playlists" aria-label="Cancelar"></a>
+        <div class="modal-box">
+            <h3>Apagar «{{ pl.name }}»?</h3>
+            <p class="meta">A playlist e as suas {{ pl.count }} estações deixam de estar guardadas. O que está a tocar não muda.</p>
+            <form action="/delete_playlist" method="post">
+                <input type="hidden" name="playlist_name" value="{{ pl.name }}">
+                <button class="stop">Apagar</button>
+            </form>
+            <a class="btn" href="#playlists">Cancelar</a>
+        </div>
+    </div>
+    {% endfor %}
+
+    <div class="modal" id="nova">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>Nova playlist</h3>
+            <form action="/create_playlist" method="post">
+                <input type="text" name="playlist_name" placeholder="Nome (ex: Favoritas, Jazz)" required>
+                {% if stations %}
+                <button class="btn-green" name="from" value="atuais">Criar com as {{ stations|length }} estações atuais</button>
+                {% endif %}
+                <button class="btn-blue" name="from" value="vazia">Criar vazia</button>
+            </form>
+            <p class="meta">A nova playlist passa a ser a da página principal.{% if stations %} Se a criares vazia, a música para até juntares uma rádio.{% endif %}</p>
+        </div>
+    </div>
+
+    <div class="modal" id="juntar">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>Juntar rádio{% if active %} a «{{ active }}»{% endif %}</h3>
+            <form action="/search#juntar" method="get">
+                <input type="text" name="q" value="{{ query }}" placeholder="Nome da rádio (ex: Comercial, jazz)" required>
+                <label><input type="checkbox" name="pt" value="1" {% if only_pt %}checked{% endif %}> Só rádios portuguesas</label>
+                <button class="btn-blue">Procurar</button>
+            </form>
+            {% if results is not none %}
+                {% for r in results %}
+                    {% if r.url_resolved in queue_urls %}
+                        <button class="result-btn" disabled>✓ {{ r.name }}</button>
+                    {% else %}
+                    <form action="/add_stream" method="post">
+                        <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                        <input type="hidden" name="name" value="{{ r.name }}">
+                        <input type="hidden" name="next" value="{{ request.full_path }}#juntar">
+                        <button class="result-btn">+ {{ r.name }}</button>
+                    </form>
+                    {% endif %}
+                    <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
+                {% else %}
+                    <p>Nenhuma rádio encontrada.</p>
+                {% endfor %}
+            {% endif %}
+            <hr>
+            <p class="meta">Ou pelo endereço do stream:</p>
+            <form action="/add_stream" method="post">
+                <input type="text" name="url" placeholder="URL (ex: http://...mp3)" required>
+                <input type="text" name="name" placeholder="Nome da estação (opcional)">
+                <button class="btn-green">+ Juntar</button>
+            </form>
+        </div>
+    </div>
+{% endblock %}

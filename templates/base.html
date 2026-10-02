@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Comando Rádio{% endblock %}</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; }
+        h2, h3 { color: #89b4fa; }
+        h3 { margin: 0 0 4px 0; }
+        a { color: #89b4fa; }
+        form { margin: 0; }
+        button, .btn { display: block; width: 100%; box-sizing: border-box; margin: 8px 0; padding: 12px; font-size: 16px; border-radius: 8px; border: none; background: #313244; color: #cdd6f4; cursor: pointer; text-align: center; text-decoration: none; font-family: inherit; }
+        button:hover, .btn:hover { background: #45475a; }
+        .stop { background: #f38ba8; color: #11111b; font-weight: bold; }
+        .btn-green { background: #a6e3a1; color: #11111b; font-weight: bold; }
+        .btn-blue { background: #89b4fa; color: #11111b; font-weight: bold; }
+        .vol { background: #fab387; color: #11111b; font-weight: bold; margin: 0; }
+        .stop:hover, .btn-green:hover, .btn-blue:hover, .vol:hover, .del:hover { filter: brightness(1.1); }
+        .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+        .row > :first-child { flex: 1; min-width: 0; }
+        .row button, .row .btn { margin: 0; }
+        .small { width: auto; padding: 12px 14px; }
+        .del { background: #f38ba8; color: #11111b; font-size: 12px; }
+        .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .playing { background: #45475a; outline: 2px solid #a6e3a1; }
+        input[type="text"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
+        .card { background: #181825; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
+        .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .card-head .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; }
+        .result-btn { text-align: left; margin: 6px 0 0 0; }
+        .meta { font-size: 12px; color: #a6adc8; margin: 2px 0 8px 4px; }
+        .warn { border-left: 4px solid #f38ba8; background: #313244; padding: 10px; border-radius: 6px; margin: 10px 0; }
+        .error h2 { color: #f38ba8; }
+        .modal { display: none; position: fixed; inset: 0; z-index: 10; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
+        .modal:target { display: flex; }
+        .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); }
+        .modal-box { position: relative; background: #181825; border-radius: 12px; padding: 15px; width: 100%; max-width: 470px; max-height: 85vh; overflow-y: auto; box-sizing: border-box; text-align: left; }
+        .modal-box h3 { margin-right: 40px; }
+        .close { position: absolute; top: 8px; right: 8px; width: 36px; height: 36px; line-height: 36px; padding: 0; margin: 0; border-radius: 18px; }
+        hr { border: none; border-top: 1px solid #313244; margin: 16px 0; }
+
+        /* PC: "A Tocar Agora" fixo à esquerda, estações em grelha à direita */
+        @media (min-width: 900px) {
+            body { max-width: 1100px; padding: 30px; }
+            .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
+            .side { position: sticky; top: 20px; }
+            .stations { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); column-gap: 10px; }
+            .modal-box { max-width: 560px; padding: 20px; }
+        }
+    </style>
+</head>
+<body>
+{% block body %}{% endblock %}
+</body>
+</html>

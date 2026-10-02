@@ -7,7 +7,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | Ficheiro | Função |
 | --- | --- |
 | `install.sh` | Instala as dependências, obtém o código e configura tudo |
-| `radio_web.py` | Comando web na porta `8080`: tocar, parar, volume, gerir a fila e as playlists |
+| `radio_web.py` | Comando web na porta `8080`: tocar, parar, volume, gerir as estações e as playlists |
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `radios.m3u` | Lista inicial de rádios portuguesas |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
@@ -93,13 +93,16 @@ cp ~/vee-radio/radios.m3u ~/.config/mpd/playlists/
 
 ## Comando web
 
-- **A Tocar Agora**: estação e faixa atuais, estado, parar e volume (±5%)
-- **Fila Atual**: tocar ou remover estações, limpar a fila
-- **Procurar Rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, com opção de mostrar só rádios portuguesas, e juntar o resultado à fila já com o nome
-- **Adicionar Novo Stream**: juntar um URL de stream à fila, com um nome opcional que passa a aparecer no botão
-- **Playlists Guardadas**: carregar uma playlist ou guardar a fila atual com um nome
+- **A Tocar Agora**: estação e faixa atuais, tocar ou parar, volume (±5%)
+- **Estações**: a lista de rádios da playlist ativa, cujo nome aparece no topo. Toca-se numa estação para a ouvir e o ✕ remove-a.
+- **Juntar rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, com opção de mostrar só rádios portuguesas, ou colar o URL de um stream com um nome opcional
+- **Playlists**: trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists
 
-Os nomes das estações vêm das linhas `#EXTINF` das playlists. Os nomes dados ao adicionar um stream ficam em `~/.config/mpd/nomes.m3u`, e guardar uma playlist mantém-nos.
+Os formulários abrem em janelas por cima da página, sem JavaScript.
+
+A lista de estações é sempre a playlist ativa: juntar ou remover uma rádio guarda logo a alteração nessa playlist, sem botão de guardar. Para ter uma lista de favoritas, cria uma playlist nova com as estações atuais e remove as que não queres, ou cria-a vazia e junta as rádios uma a uma. Ao apagar a playlist ativa, as estações continuam a tocar mas deixam de estar guardadas, e a página oferece guardá-las com outro nome. A playlist ativa fica em `~/.config/mpd/playlist-ativa.txt`.
+
+Os nomes das estações vêm das linhas `#EXTINF` das playlists. Os nomes dados ao juntar um stream ficam também em `~/.config/mpd/nomes.m3u`.
 
 ## Resolução de problemas
 

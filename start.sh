@@ -15,7 +15,8 @@ mpd
 sleep 1
 # Só carrega as rádios se a fila restaurada pelo MPD estiver vazia (evita duplicados)
 if [ -z "$(mpc playlist 2>/dev/null)" ]; then
-    mpc load radios >/dev/null 2>&1 || true
+    # O comando web passa a guardar nesta playlist o que se juntar ou remover
+    mpc load radios >/dev/null 2>&1 && echo radios > ~/.config/mpd/playlist-ativa.txt
 fi
 
 echo "A iniciar servidor Web (porta 8080)..."

@@ -25,7 +25,7 @@ A radio jukebox for an old Android phone running Termux. MPD plays the radio str
 ```bash
 ~/start.sh                              # start MPD + web (port 8080) + tunnel
 ~/stop.sh                               # stop everything, release the wake lock
-cd ~/vee-radio && git pull && ~/start.sh   # update
+cd ~/vee-radio && git pull && bash install.sh && ~/start.sh   # update (install.sh re-applies config such as the boot script)
 mpc status / mpc playlist               # inspect MPD directly
 ```
 

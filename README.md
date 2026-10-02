@@ -11,6 +11,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `radios.m3u` | Lista inicial de rádios portuguesas |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
+| `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
 ## Requisitos
 
@@ -51,11 +52,7 @@ Ativa o wake lock do Android, inicia o MPD, carrega a playlist `radios` se a fil
 
 Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux, fica em `~/tunnel-url.txt` e é mostrado no fundo do comando web. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
 
-O link muda sempre que o `start.sh` corre. Se o túnel não arrancar, vê o `~/tunnel.log`.
-
-### Arranque automático
-
-Instala a app [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) do F-Droid e abre-a uma vez. A partir daí, quando o telemóvel liga, a rádio arranca sozinha: espera até 2 minutos pela internet e corre o `~/start.sh`. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o arranque fica registado em `~/boot.log`.
+O link muda sempre que o `start.sh` corre.
 
 ```bash
 ~/stop.sh
@@ -63,10 +60,29 @@ Instala a app [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) do F-
 
 Para tudo e liberta o wake lock.
 
+### Arranque automático
+
+Para a rádio arrancar sozinha sempre que o telemóvel liga:
+
+1. Instala a app [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) do F-Droid. Tem de vir da mesma loja que o Termux.
+2. Abre o Termux:Boot uma vez. Sem isso, o Android não o deixa correr no arranque.
+3. Nas definições do Android, desativa a otimização de bateria para o **Termux** e para o **Termux:Boot**.
+
+No arranque, o script espera até 2 minutos pela internet e depois corre o `~/start.sh`. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
+
 ## Atualizar
 
 ```bash
-cd ~/vee-radio && git pull && ~/start.sh
+cd ~/vee-radio && git pull && bash install.sh && ~/start.sh
+```
+
+Convém correr outra vez o `install.sh` depois do `git pull`, porque algumas novidades, como o arranque automático, são configuradas por ele. As playlists e os nomes guardados mantêm-se.
+
+Se instalaste à mão, copiando os ficheiros sem `git clone`, a pasta `~/vee-radio` não tem `.git` e o `git pull` não funciona. Nesse caso, muda-lhe o nome e instala de novo:
+
+```bash
+mv ~/vee-radio ~/vee-radio.antigo
+curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.sh | bash
 ```
 
 Alterações ao `radios.m3u` não substituem a playlist já instalada. Para repor a lista do repositório:
@@ -85,10 +101,22 @@ cp ~/vee-radio/radios.m3u ~/.config/mpd/playlists/
 
 Os nomes das estações vêm das linhas `#EXTINF` das playlists. Os nomes dados ao adicionar um stream ficam em `~/.config/mpd/nomes.m3u`, e guardar uma playlist mantém-nos.
 
-Logs do servidor web em `~/web.log`.
+## Resolução de problemas
+
+| Problema | O que ver |
+| --- | --- |
+| O link não aparece | `~/tunnel.log`. O telemóvel tem de ter internet. Volta a correr o `~/start.sh`. |
+| O comando web dá erro ou não abre | `~/web.log` |
+| A página diz "MPD indisponível" | O MPD parou. Corre o `~/start.sh`. |
+| Não arrancou sozinho depois de ligar o telemóvel | `~/boot.log`. Confirma os passos do [arranque automático](#arranque-automático). |
+| A rádio para ao fim de algum tempo | O Android está a matar o Termux. Desativa a otimização de bateria para o Termux. |
+| Uma rádio aparece no botão mas não toca | Corre `mpc status` para ver o erro. O stream pode ter mudado de endereço. Procura a rádio outra vez no comando web. |
+
+Para ver o estado diretamente no Termux: `mpc status`, `mpc playlist` e `cat ~/tunnel-url.txt`.
 
 ## Notas
 
-- O link do Cloudflare muda sempre que o `start.sh` arranca.
+- O link do Cloudflare muda sempre que o `start.sh` arranca. Para ter um link fixo, é preciso um túnel Cloudflare com nome, o que exige conta e domínio.
+- A pesquisa de rádios esconde os streams HLS (`.m3u8`), porque o MPD nem sempre os consegue tocar.
 - O comando web não tem autenticação: qualquer pessoa com o link pode controlar a rádio.
 - Os scripts têm de ter finais de linha LF. O `.gitattributes` garante isso mesmo quando se edita no Windows.

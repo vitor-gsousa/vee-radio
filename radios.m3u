@@ -1,0 +1,13 @@
+#EXTM3U
+#EXTINF:-1,Antena 1
+http://radiocast.rtp.pt/antena180a.mp3
+#EXTINF:-1,Antena 3
+http://radiocast.rtp.pt/antena380a.mp3
+#EXTINF:-1,TSF
+https://tsfdirecto.tsf.pt/tsfdireto.mp3
+#EXTINF:-1,Radio Comercial
+https://stream-icy.bauermedia.pt/comercial.mp3
+#EXTINF:-1,M80 Portugal
+https://stream-icy.bauermedia.pt/m80.mp3
+#EXTINF:-1,Costa Del Mar Chillout
+https://costadelmar.ice.infomaniak.ch/costadelmar-chillout.mp3

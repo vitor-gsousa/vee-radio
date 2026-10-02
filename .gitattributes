@@ -1,0 +1,2 @@
+# O Termux não aceita CRLF nos scripts; força LF mesmo quando se edita no Windows
+* text=auto eol=lf

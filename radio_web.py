@@ -4,14 +4,21 @@ import json
 import os
 import re
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 
-from flask import Flask, Response, jsonify, render_template, request, redirect
+from flask import Flask, Request, Response, jsonify, render_template, request, redirect
 from mpd import MPDClient, MPDError
 
+class BigFormRequest(Request):
+    # Com "Todas", o "Juntar todas" de um tema manda centenas de rádios, com 3
+    # campos cada; o limite do Werkzeug é de 1000 campos por formulário
+    max_form_parts = 5000
+
 app = Flask(__name__)
+app.request_class = BigFormRequest
 
 @app.template_filter("flag")
 def flag(code):
@@ -70,8 +77,11 @@ COUNTRIES = [
 ]
 COUNTRY_LABELS = dict(COUNTRIES)
 # Ordenações da API (campo order, do maior para o menor); "random" serve para descobrir rádios novas
-ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "em alta"), ("random", "aleatórias")]
+# "name" mostra todas, por ordem alfabética, até ALL_LIMIT
+ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "em alta"), ("random", "aleatórias"),
+          ("name", "todas, de A a Z")]
 ORDER_LABELS = dict(ORDERS)
+ALL_LIMIT = 500
 # Línguas pelo nome em inglês, como estão na API. O filtro language apanha partes
 # do nome, por isso "portuguese" inclui "brazilian portuguese"
 LANGUAGES = [
@@ -413,7 +423,10 @@ def initials_response(name):
 def find_stations(filters, limit, **criteria):
     # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
     # Pede mais do que o limite porque os repetidos e os HLS ficam de fora.
-    params = {"limit": limit * 2, "hidebroken": "true", "order": filters["ordem"], "reverse": "true", **criteria}
+    if filters["ordem"] == "name":
+        limit = ALL_LIMIT
+    params = {"limit": limit * 2, "hidebroken": "true", "order": filters["ordem"],
+              "reverse": "false" if filters["ordem"] == "name" else "true", **criteria}
     if filters["pais"]:
         params["countrycode"] = filters["pais"]
     if filters["lingua"]:
@@ -437,7 +450,15 @@ def find_stations(filters, limit, **criteria):
                 s["favicon"] = ""
             s["name"] = " ".join(s.get("name", "").split())
             results.append(s)
+    if filters["ordem"] == "name":
+        # A API ordena os nomes tal como estão, com espaços e pontuação à frente
+        # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas
+        results.sort(key=lambda s: sort_key(s["name"]))
     return results[:limit]
+
+def sort_key(name):
+    plain = "".join(ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch))
+    return re.sub(r"^\W+", "", plain).casefold()
 
 API_DOWN = ("Pesquisa indisponível", "Não foi possível contactar o radio-browser.info. Tenta outra vez.", 502)
 

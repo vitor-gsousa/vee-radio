@@ -20,7 +20,7 @@
             {% for k in bitrates %}<option value="{{ k }}"{% if filters.kbps == k %} selected{% endif %}>{{ k }} kbps ou mais</option>{% endfor %}
         </select>
         <select name="ordem" aria-label="Ordenar">
-            {% for key, label in orders %}<option value="{{ key }}"{% if filters.ordem == key %} selected{% endif %}>{{ label|capitalize }}</option>{% endfor %}
+            {% for key, label in orders %}<option value="{{ key }}"{% if filters.ordem == key %} selected{% endif %}>{{ label[:1]|upper }}{{ label[1:] }}</option>{% endfor %}
         </select>
     </div>
 {% endmacro %}
@@ -162,7 +162,7 @@
         <div class="modal-box">
             <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
             <h3>{{ theme.label }}</h3>
-            <p class="meta">{% if theme.tag %}<a href="#temas">← Temas</a>{% else %}<a href="#paises">← Países</a>{% endif %}{% if theme.results %} · as {{ theme.results|length }} rádios {{ dict(orders)[filters.ordem] }}{% endif %}</p>
+            <p class="meta">{% if theme.tag %}<a href="#temas">← Temas</a>{% else %}<a href="#paises">← Países</a>{% endif %}{% if theme.results %} · {% if filters.ordem == 'name' %}{{ theme.results|length }} rádios, de A a Z{% else %}as {{ theme.results|length }} rádios {{ dict(orders)[filters.ordem] }}{% endif %}{% endif %}</p>
             {# Mudar o país ou a ordenação sem voltar atrás #}
             <form action="/tema#tema" method="get" class="refine">
                 {% if theme.tag %}<input type="hidden" name="t" value="{{ theme.tag }}">{% endif %}
@@ -196,7 +196,7 @@
             {% endif %}
             {% for r in theme.results %}
             <div class="result">
-                <span class="thumb{% if r.favicon %} has-img" style="background-image: url('{{ r.favicon }}'){% endif %}"></span>
+                {% if r.favicon %}<img class="thumb has-img" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="thumb"></span>{% endif %}
                 <div class="result-body">
                     {% if r.url_resolved in queue_urls %}
                         <button class="result-btn" disabled>✓ {{ r.name }}</button>
@@ -232,8 +232,8 @@
             {% if results is not none %}
                 {% for r in results %}
                 <div class="result">
-                    {# O favicon vem direto do radio-browser; se não carregar, fica só o quadrado #}
-                    <span class="thumb{% if r.favicon %} has-img" style="background-image: url('{{ r.favicon }}'){% endif %}"></span>
+                    {# O favicon vem direto do radio-browser e só carrega quando aparece no ecrã #}
+                    {% if r.favicon %}<img class="thumb has-img" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="thumb"></span>{% endif %}
                     <div class="result-body">
                         {% if r.url_resolved in queue_urls %}
                             <button class="result-btn" disabled>✓ {{ r.name }}</button>

@@ -70,7 +70,7 @@
         /* Resultados da pesquisa com o favicon da rádio */
         .result { display: flex; gap: 10px; align-items: flex-start; margin-top: 8px; }
         .thumb { width: 46px; height: 46px; flex: none; margin-top: 6px; border-radius: 8px; background: #313244 center / contain no-repeat; }
-        .thumb.has-img { background-color: #fff; }
+        .thumb.has-img { background-color: #fff; object-fit: contain; }
         .result-body { flex: 1; min-width: 0; }
 
         /* Temas */
@@ -79,9 +79,7 @@
         select { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
         .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 0 6px; }
         .filters select { min-width: 0; padding: 10px 6px; font-size: 15px; text-overflow: ellipsis; }
-        .refine { display: flex; gap: 6px; align-items: center; }
-        .refine .filters { flex: 1; min-width: 0; }
-        .refine button { width: auto; margin: 0; padding: 10px 14px; font-size: 14px; }
+        .refine button { margin: 0 0 6px; padding: 10px; font-size: 14px; }
         .theme-add label { display: block; margin: 8px 0 0 4px; }
 
         /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
@@ -119,6 +117,9 @@
             .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
             .player-logo { width: 60px; height: 60px; }
             .player-volume { justify-self: end; width: 100%; max-width: 260px; }
+            .refine { display: flex; gap: 6px; align-items: center; }
+            .refine .filters { flex: 1; min-width: 0; }
+            .refine button { width: auto; margin: 0; padding: 10px 14px; }
             .stations { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
             .tile-name { font-size: 14px; }
             .badge-text { display: inline; }

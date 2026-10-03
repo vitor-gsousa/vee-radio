@@ -7,6 +7,7 @@ import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from flask import Flask, Request, Response, jsonify, render_template, request, redirect
@@ -42,6 +43,14 @@ LOGO_URL_RE = re.compile(r"^https?://[^\s\"',()\\]+$")
 LOGO_MAX_BYTES = 512 * 1024
 # Depois de uma falha, só volta a tentar descarregar o logótipo passado um dia
 LOGO_RETRY_SECONDS = 24 * 3600
+# Cliques e votos das estações no radio-browser, para ordenar a lista pelas mais
+# ouvidas ou votadas: URL do stream -> {"uuid", "clickcount", "votes", "t"}
+STATS_FILE = os.path.expanduser("~/.cache/vee-radio/stats.json")
+STATS_MAX_AGE = 24 * 3600
+# Depois de uma falha de rede, volta a tentar passada uma hora
+STATS_RETRY_SECONDS = 3600
+UUID_RE = re.compile(r"^[0-9a-f-]{36}$")
+API = "https://all.api.radio-browser.info"
 # Cores das iniciais quando a rádio não tem logótipo
 TILE_COLORS = ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#94e2d5", "#89dceb", "#89b4fa", "#cba6f7", "#f5c2e7"]
 
@@ -82,6 +91,11 @@ ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktren
           ("name", "todas, de A a Z")]
 ORDER_LABELS = dict(ORDERS)
 ALL_LIMIT = 500
+# Ordenações da lista de estações na página. Só mudam o que se vê: a playlist,
+# e o anterior/seguinte, continuam pela ordem guardada
+LIST_ORDERS = [("", "ordem da playlist"), ("clickcount", ORDER_LABELS["clickcount"]), ("votes", ORDER_LABELS["votes"]),
+               ("name", "de A a Z"), ("-name", "de Z a A")]
+POPULAR_ORDERS = ("clickcount", "votes")
 # Línguas pelo nome em inglês, como estão na API. O filtro language apanha partes
 # do nome, por isso "portuguese" inclui "brazilian portuguese"
 LANGUAGES = [
@@ -215,13 +229,87 @@ def fetch(url, limit):
     with urllib.request.urlopen(req, timeout=8) as r:
         return r.read(limit + 1)
 
+def api_get(path, **params):
+    return json.loads(fetch(API + path + "?" + urllib.parse.urlencode(params), 4 * 1024 * 1024))
+
 def lookup_logo(stream_url):
     # Só procura pelo URL exato do stream: pelo nome aparecem rádios de outros países
-    url = "https://all.api.radio-browser.info/json/stations/byurl?" + urllib.parse.urlencode({"url": stream_url})
-    for s in json.loads(fetch(url, 1024 * 1024)):
+    for s in api_get("/json/stations/byurl", url=stream_url):
         if LOGO_URL_RE.match(s.get("favicon") or ""):
             return s["favicon"]
     return None
+
+def load_stats():
+    try:
+        with open(STATS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+
+def save_stats(stats):
+    os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
+    tmp = STATS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(stats, f)
+    os.replace(tmp, STATS_FILE)
+
+def stat_entry(station):
+    return {"uuid": station.get("stationuuid"), "clickcount": int(station.get("clickcount") or 0),
+            "votes": int(station.get("votes") or 0), "t": time.time()}
+
+def remember_uuids(pairs):
+    # Rádios juntadas a partir da pesquisa ou de um tema: guardar o uuid deixa
+    # atualizar os números de muitas de uma vez, sem as procurar pelo URL
+    pairs = [(u, i) for u, i in pairs if u and UUID_RE.match(i or "")]
+    if not pairs:
+        return
+    stats = load_stats()
+    for url, uuid in pairs:
+        if stats.get(url, {}).get("uuid") != uuid:
+            stats[url] = {"uuid": uuid, "clickcount": 0, "votes": 0, "t": 0}
+    save_stats(stats)
+
+def station_stats(urls):
+    # Números do radio-browser das estações, guardados por um dia. As de uuid
+    # conhecido atualizam-se num só pedido; as outras procuram-se pelo URL, em paralelo
+    stats = load_stats()
+    now = time.time()
+    def stale():
+        return [u for u in urls if now - stats.get(u, {}).get("t", 0) > STATS_MAX_AGE]
+    by_uuid = {stats[u]["uuid"]: u for u in stale() if stats.get(u, {}).get("uuid")}
+    uuids = list(by_uuid)
+    for i in range(0, len(uuids), 100):
+        try:
+            for st in api_get("/json/stations/byuuid", uuids=",".join(uuids[i:i + 100])):
+                if st.get("stationuuid") in by_uuid:
+                    stats[by_uuid[st["stationuuid"]]] = stat_entry(st)
+        except (OSError, ValueError):
+            break
+    def lookup(url):
+        old = stats.get(url, {"uuid": None, "clickcount": 0, "votes": 0})
+        try:
+            found = api_get("/json/stations/byurl", url=url)
+        except (OSError, ValueError):
+            return url, {**old, "t": now - STATS_MAX_AGE + STATS_RETRY_SECONDS}
+        # A mesma rádio aparece várias vezes; fica a mais ouvida
+        best = max(found, key=lambda st: int(st.get("clickcount") or 0), default=None)
+        return url, stat_entry(best) if best else {"uuid": None, "clickcount": 0, "votes": 0, "t": now}
+    missing = stale()
+    if missing:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            stats.update(pool.map(lookup, missing))
+    if uuids or missing:
+        save_stats(stats)
+    return stats
+
+@app.template_filter("compact")
+def compact(n):
+    # 14908 -> "14,9 mil"
+    if n < 1000:
+        return str(n)
+    if n < 1000000:
+        return f"{n / 1000:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " mil"
+    return f"{n / 1000000:.1f}".rstrip("0").rstrip(".").replace(".", ",") + " M"
 
 def initials_svg(name):
     words = re.findall(r"\w+", name or "")
@@ -319,8 +407,23 @@ def render_index(results=None, query="", filters=None, theme=None):
     info = station_info()
     display_name = display_namer(info)
     player = player_context(status, current, info)
-    stations = [{"pos": s["pos"], "name": display_name(s), "key": logo_key(s["file"]),
+    # Filtro e ordenação da lista: as estações escondidas vão na página com hidden,
+    # para o script as poder mostrar enquanto se escreve, sem pedir outra vez
+    list_filter = request.args.get("filtro", "").strip()
+    list_order = request.args.get("ordenar", "")
+    wanted = plain_text(list_filter)
+    stations = [{"pos": s["pos"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
                  "current": s["pos"] == player["current_pos"]} for s in queue]
+    for s in stations:
+        s["hidden"] = wanted not in plain_text(s["name"])
+    if list_order in POPULAR_ORDERS:
+        stats = station_stats([s["file"] for s in stations])
+        for s in stations:
+            s["stat"] = stats.get(s["file"], {}).get(list_order, 0)
+        # sort estável: em caso de empate fica a ordem da playlist
+        stations.sort(key=lambda s: -s["stat"])
+    elif list_order in ("name", "-name"):
+        stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
     playlists = [{"name": p, "count": len(read_m3u(playlist_path(p) or ""))} for p in stored_playlists]
     try:
         with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
@@ -329,6 +432,8 @@ def render_index(results=None, query="", filters=None, theme=None):
         public_url = ""
     return render_template("index.html", **player,
                                   stations=stations, queue_urls={s["file"] for s in queue},
+                                  list_filter=list_filter, list_order=list_order if list_order in dict(LIST_ORDERS) else "",
+                                  list_orders=LIST_ORDERS,
                                   playlists=playlists, active=active_playlist(),
                                   results=results, query=query, filters=filters or search_filters(), public_url=public_url,
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
@@ -362,9 +467,17 @@ def estado():
                    station=player["current_station"], playing=status.get("state") == "play",
                    queue=status.get("playlist", ""), error=status.get("error", ""))
 
+def back():
+    # Volta à página de onde veio o formulário (resultados da pesquisa, lista
+    # filtrada); só aceita caminhos locais
+    next_url = request.form.get("next", "")
+    if next_url.startswith("/") and not next_url.startswith("//"):
+        return redirect(next_url)
+    return redirect("/")
+
 def done():
     # Os botões do reprodutor devolvem o estado ao script, em vez da página inteira
-    return estado() if from_script() else redirect("/")
+    return estado() if from_script() else back()
 
 @app.route("/")
 def index():
@@ -433,7 +546,7 @@ def find_stations(filters, limit, **criteria):
         params["language"] = filters["lingua"]
     if filters["kbps"]:
         params["bitrateMin"] = filters["kbps"]
-    url = "https://all.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
+    url = API + "/json/stations/search?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
         stations = json.load(r)
@@ -456,9 +569,12 @@ def find_stations(filters, limit, **criteria):
         results.sort(key=lambda s: sort_key(s["name"]))
     return results[:limit]
 
+def plain_text(text):
+    # Sem acentos nem maiúsculas, para comparar e ordenar nomes
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch)).casefold()
+
 def sort_key(name):
-    plain = "".join(ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch))
-    return re.sub(r"^\W+", "", plain).casefold()
+    return re.sub(r"^\W+", "", plain_text(name))
 
 API_DOWN = ("Pesquisa indisponível", "Não foi possível contactar o radio-browser.info. Tenta outra vez.", 502)
 
@@ -506,6 +622,7 @@ def add_theme():
         return error_page("Nome inválido", "O nome da playlist não pode ter / nem \\ nem começar por ponto.", 400)
     logos = [l if LOGO_URL_RE.match(l) else None for l in request.form.getlist("logo")]
     picked = list(zip(request.form.getlist("url"), request.form.getlist("name"), logos))
+    remember_uuids(zip(request.form.getlist("url"), request.form.getlist("uuid")))
     existed = os.path.isfile(path)
     entries = read_m3u(path)
     known = {u for u, _, _ in entries}
@@ -590,6 +707,7 @@ def add_stream():
     if not LOGO_URL_RE.match(logo):
         logo = ""
     if url:
+        remember_uuids([(url, request.form.get("uuid", ""))])
         # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele
         if name or logo:
             with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
@@ -603,18 +721,14 @@ def add_stream():
         with mpd_client() as c:
             c.add(url)
             sync_active(c)
-    # Vindo da pesquisa, volta aos resultados; só aceita caminhos locais
-    next_url = request.form.get("next", "")
-    if next_url.startswith("/") and not next_url.startswith("//"):
-        return redirect(next_url)
-    return redirect("/")
+    return back()
 
 @app.route("/remove/<int:pos>", methods=["POST"])
 def remove(pos):
     with mpd_client() as c:
         c.delete(pos)
         sync_active(c)
-    return redirect("/")
+    return back()
 
 @app.route("/load_playlist", methods=["POST"])
 def load_playlist():

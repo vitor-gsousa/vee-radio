@@ -6,6 +6,8 @@
     <title>{% block title %}Comando Rádio{% endblock %}</title>
     {# Opcional: sem ele a página funciona na mesma, com formulários e redirects #}
     <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+    {# Marca a página como tendo JavaScript logo no início, para os esqueletos das imagens só aparecerem com ele #}
+    <script>document.documentElement.classList.add("js");</script>
     <style>
         body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; padding-bottom: 150px; }
         h2, h3 { color: #89b4fa; }
@@ -26,9 +28,15 @@
         .del { background: #f38ba8; color: #11111b; font-size: 12px; }
         .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .playing { background: #45475a; outline: 2px solid #a6e3a1; }
-        input[type="text"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
+        [hidden] { display: none !important; }
+        input[type="text"], input[type="search"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
         .card { background: #181825; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
-        .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+        /* Procurar e ordenar a lista: numa linha própria no telemóvel, ao lado do título no PC */
+        .list-tools { order: 3; flex-basis: 100%; display: flex; gap: 6px; align-items: center; }
+        .list-tools input { flex: 1; min-width: 0; margin: 0; }
+        .list-tools select { width: auto; margin: 0; }
+        .list-tools button { width: auto; margin: 0; padding: 10px 14px; }
         .card-head .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; }
         .result-btn { text-align: left; margin: 6px 0 0 0; }
         .meta { font-size: 12px; color: #a6adc8; margin: 2px 0 8px 4px; }
@@ -82,6 +90,17 @@
         .refine button { margin: 0 0 6px; padding: 10px; font-size: 14px; }
         .theme-add label { display: block; margin: 8px 0 0 4px; }
 
+        /* Barra de navegação no topo. O box-shadow e o clip-path estendem o fundo
+           à largura do ecrã sem criar scroll horizontal */
+        .topbar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: -20px 0 20px; padding: 10px 0; background: #1e1e2e; box-shadow: 0 0 0 100vmax #1e1e2e; clip-path: inset(0 -100vmax); border-bottom: 1px solid #313244; }
+        .brand { font-size: 18px; font-weight: bold; color: #89b4fa; text-decoration: none; white-space: nowrap; }
+        .nav-actions { display: flex; gap: 6px; }
+        .nav-actions .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+        @media (max-width: 480px) {
+            .brand { font-size: 24px; }
+            .brand-name, .long { display: none; }
+        }
+
         /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
         .player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "volume volume"; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #11111b; border-top: 1px solid #313244; text-align: left; }
         .player form { margin: 0; }
@@ -104,6 +123,29 @@
         .volbar span { display: block; height: 100%; background: #a6e3a1; }
         .vol-num { font-size: 12px; color: #a6adc8; min-width: 34px; text-align: right; }
 
+        /* Esqueletos: blocos a brilhar no lugar do que ainda está a carregar */
+        @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+        .skel, .js .tile-play img:not(.loaded), .js .thumb.has-img:not(.loaded), .js img.player-logo:not(.loaded),
+        .stations.is-loading .tile-play::after {
+            background: linear-gradient(90deg, #313244 30%, #45475a 50%, #313244 70%) 0 0 / 200% 100%;
+            animation: shimmer 1.2s linear infinite;
+        }
+        .skel { display: block; border-radius: 8px; }
+        .skel-row { display: flex; gap: 10px; align-items: flex-start; margin-top: 14px; }
+        .skel-thumb { width: 46px; height: 46px; flex: none; margin-top: 6px; }
+        .skel-body { flex: 1; min-width: 0; }
+        .skel-line { height: 44px; margin-top: 6px; }
+        .skel-meta { height: 10px; width: 55%; margin: 8px 0 0 4px; }
+        .skel-row:nth-child(even) .skel-meta { width: 40%; }
+        /* Lista a ser reordenada (as mais ouvidas podem demorar a primeira vez) */
+        .tile-play { position: relative; }
+        .stations.is-loading .tile { pointer-events: none; }
+        .stations.is-loading .tile-play::after { content: ""; position: absolute; inset: 0; border-radius: 12px; opacity: 0.85; }
+        .tile-stat { font-size: 12px; color: #a6adc8; }
+        /* Com o script, os filtros aplicam-se ao mudar e o botão Atualizar não é preciso */
+        .js .refine button { display: none; }
+        @media (prefers-reduced-motion: reduce) { .skel, .js img:not(.loaded), .stations.is-loading .tile-play::after { animation: none; } }
+
         /* Enquanto o script espera pelo servidor: uma linha a correr no topo */
         body.busy { cursor: progress; }
         body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; height: 3px; width: 40%; background: #89b4fa; animation: busy 1s ease-in-out infinite; }
@@ -117,6 +159,11 @@
             .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
             .player-logo { width: 60px; height: 60px; }
             .player-volume { justify-self: end; width: 100%; max-width: 260px; }
+            .topbar { margin-top: -30px; padding: 14px 0; }
+            .brand { font-size: 22px; }
+            .nav-actions .btn { padding: 10px 16px; font-size: 15px; }
+            .list-tools { order: 1; flex: 0 1 440px; margin-left: auto; }
+            .card-head > .btn { order: 2; }
             .refine { display: flex; gap: 6px; align-items: center; }
             .refine .filters { flex: 1; min-width: 0; }
             .refine button { width: auto; margin: 0; padding: 10px 14px; }

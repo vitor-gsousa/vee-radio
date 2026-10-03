@@ -87,6 +87,7 @@ curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.s
 
 ## Comando web
 
+- **Estações**: procurar pelo nome na lista atual e ordená-la pela ordem da playlist, pelas mais ouvidas ou mais votadas no radio-browser.info, ou de A a Z (só muda o que se vê, a playlist fica igual). Os números do radio-browser ficam guardados no telemóvel por um dia, por isso a primeira vez pode demorar uns segundos
 - **Reprodutor** (barra fixa no fundo, como no Spotify): estação e faixa atuais, tocar ou parar, estação anterior e seguinte, volume (±5%)
 - **Estações**: a lista de rádios da playlist ativa, cujo nome aparece no topo. Toca-se numa estação para a ouvir e o ✕ remove-a.
 - **Juntar rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, filtrando por país, língua e qualidade mínima e ordenando pelas mais ouvidas, mais votadas, em alta ou aleatórias, ou colar o URL de um stream com um nome opcional
@@ -94,7 +95,7 @@ curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.s
 - **Países**: ver as rádios de um país (Portugal, Brasil, Espanha...) e juntá-las a uma playlist da mesma forma
 - **Playlists**: trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists
 
-Os formulários abrem em janelas por cima da página. Com JavaScript, os botões respondem sem recarregar a página e a barra do reprodutor atualiza-se sozinha a cada 5 segundos (estação, música, volume). Sem JavaScript, tudo funciona na mesma, recarregando a página.
+Os formulários abrem em janelas por cima da página. Com JavaScript, a pesquisa de rádios corre enquanto se escreve, os filtros aplicam-se ao mudar, aparecem esqueletos a brilhar enquanto os dados e os logótipos carregam, os botões respondem sem recarregar a página e a barra do reprodutor atualiza-se sozinha a cada 5 segundos (estação, música, volume). Sem JavaScript, tudo funciona na mesma, recarregando a página.
 
 A lista de estações é sempre a playlist ativa: juntar ou remover uma rádio guarda logo a alteração nessa playlist, sem botão de guardar. Para ter uma lista de favoritas, cria uma playlist nova com as estações atuais e remove as que não queres, ou cria-a vazia e junta as rádios uma a uma. Ao apagar a playlist ativa, as estações continuam a tocar mas deixam de estar guardadas, e a página oferece guardá-las com outro nome. A playlist ativa fica em `~/.config/mpd/playlist-ativa.txt`.
 

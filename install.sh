@@ -13,8 +13,16 @@ main() {
     fi
 
     echo "=== 1. A atualizar repositórios e a instalar dependências ==="
-    pkg update -y && pkg upgrade -y
-    pkg install -y mpd mpc python git nano ffmpeg libcurl ca-certificates cloudflared
+    # Com "curl | bash" não há teclado para as perguntas do dpkg sobre ficheiros de
+    # configuração alterados (o openssl faz uma) e a atualização falhava; fica
+    # sempre a versão já instalada. O stdin vem de /dev/null pelo mesmo motivo.
+    local APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+    export DEBIAN_FRONTEND=noninteractive
+    # Termina uma instalação que tenha ficado a meio (por exemplo, numa tentativa anterior)
+    dpkg --force-confdef --force-confold --configure -a </dev/null
+    pkg update -y </dev/null
+    apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
+    apt-get "${APT_OPTS[@]}" install mpd mpc python git nano ffmpeg libcurl ca-certificates cloudflared </dev/null
 
     echo "=== 2. A instalar bibliotecas Python ==="
     pip install flask python-mpd2

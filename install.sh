@@ -20,7 +20,8 @@ main() {
     export DEBIAN_FRONTEND=noninteractive
     # Termina uma instalação que tenha ficado a meio (por exemplo, numa tentativa anterior)
     dpkg --force-confdef --force-confold --configure -a </dev/null
-    pkg update -y </dev/null
+    # apt-get e não pkg: o "pkg update" também atualiza os pacotes, mas sem as opções acima
+    apt-get update </dev/null
     apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
     apt-get "${APT_OPTS[@]}" install mpd mpc python git nano ffmpeg libcurl ca-certificates cloudflared </dev/null
 

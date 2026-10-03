@@ -4,8 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Comando Rádio{% endblock %}</title>
+    {# Opcional: sem ele a página funciona na mesma, com formulários e redirects #}
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; }
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; padding-bottom: 150px; }
         h2, h3 { color: #89b4fa; }
         h3 { margin: 0 0 4px 0; }
         a { color: #89b4fa; }
@@ -15,15 +17,11 @@
         .stop { background: #f38ba8; color: #11111b; font-weight: bold; }
         .btn-green { background: #a6e3a1; color: #11111b; font-weight: bold; }
         .btn-blue { background: #89b4fa; color: #11111b; font-weight: bold; }
-        .vol { background: #fab387; color: #11111b; font-weight: bold; margin: 0; }
-        .stop:hover, .btn-green:hover, .btn-blue:hover, .vol:hover, .del:hover { filter: brightness(1.1); }
+        .stop:hover, .btn-green:hover, .btn-blue:hover, .del:hover { filter: brightness(1.1); }
         .row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
         .row > :first-child { flex: 1; min-width: 0; }
         .row button, .row .btn { margin: 0; }
         .row > .btn { flex: 1; }
-        /* Parar/Tocar ocupa o dobro de cada botão de volume; sem ele, o volume divide a linha */
-        .controls > form { flex: 1; }
-        .controls > .grow { flex: 2; }
         .small { width: auto; padding: 12px 14px; }
         .del { background: #f38ba8; color: #11111b; font-size: 12px; }
         .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -37,21 +35,12 @@
         .warn { border-left: 4px solid #f38ba8; background: #313244; padding: 10px; border-radius: 6px; margin: 10px 0; }
         .error h2 { color: #f38ba8; }
         .modal { display: none; position: fixed; inset: 0; z-index: 10; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box; }
-        .modal:target { display: flex; }
+        .modal:target, .modal.open { display: flex; }
         .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.7); }
         .modal-box { position: relative; background: #181825; border-radius: 12px; padding: 15px; width: 100%; max-width: 470px; max-height: 85vh; overflow-y: auto; box-sizing: border-box; text-align: left; }
         .modal-box h3 { margin-right: 40px; }
         .close { position: absolute; top: 8px; right: 8px; width: 36px; height: 36px; line-height: 36px; padding: 0; margin: 0; border-radius: 18px; }
         hr { border: none; border-top: 1px solid #313244; margin: 16px 0; }
-
-        /* A tocar agora: logótipo grande ao lado do nome e da faixa */
-        .now { display: flex; gap: 14px; align-items: center; margin: 12px 0; }
-        .now-logo { width: 88px; height: 88px; flex: none; border-radius: 12px; object-fit: contain; background: #fff; }
-        .now-logo.empty { background: #313244; display: flex; align-items: center; justify-content: center; font-size: 36px; }
-        .now-info { min-width: 0; }
-        .now-station { font-size: 20px; font-weight: bold; overflow-wrap: anywhere; }
-        .now-title { font-size: 14px; color: #bac2de; margin-top: 4px; overflow-wrap: anywhere; }
-        .now-info .meta { margin: 6px 0 0 0; }
 
         /* Estações em cartões com logótipo; sem logótipo, o servidor devolve as iniciais */
         .stations { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; margin-bottom: 12px; }
@@ -65,6 +54,15 @@
         .tile.current .tile-play { background: #45475a; outline: 3px solid #a6e3a1; }
         .badge { position: absolute; left: 12px; top: 12px; background: #a6e3a1; color: #11111b; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 6px; pointer-events: none; }
         .badge-text { display: none; }
+        .tile:not(.current) .badge { display: none; }
+        /* Barras de equalizador a mexer na estação que está a tocar */
+        .eq { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; vertical-align: -1px; }
+        .eq i { width: 3px; height: 100%; background: currentColor; border-radius: 1px; animation: eq 0.9s ease-in-out infinite; }
+        .eq i:nth-child(2) { animation-delay: -0.3s; }
+        .eq i:nth-child(3) { animation-delay: -0.6s; }
+        @keyframes eq { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }
+        .eq i { transform-origin: bottom; }
+        @media (prefers-reduced-motion: reduce) { .eq i { animation: none; } }
         .tile-del { position: absolute; top: 4px; right: 4px; height: auto !important; }
         .tile-del button { width: 28px; height: 28px; padding: 0; margin: 0; border-radius: 14px; font-size: 13px; background: rgba(17, 17, 27, 0.8); color: #f38ba8; }
         .tile-del button:hover { background: #f38ba8; color: #11111b; }
@@ -79,13 +77,48 @@
         .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
         .chips button { width: auto; margin: 0; padding: 8px 14px; font-size: 14px; border-radius: 18px; }
         select { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
+        .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 0 6px; }
+        .filters select { min-width: 0; padding: 10px 6px; font-size: 15px; text-overflow: ellipsis; }
+        .refine { display: flex; gap: 6px; align-items: center; }
+        .refine .filters { flex: 1; min-width: 0; }
+        .refine button { width: auto; margin: 0; padding: 10px 14px; font-size: 14px; }
         .theme-add label { display: block; margin: 8px 0 0 4px; }
 
-        /* PC: "A Tocar Agora" fixo à esquerda, estações em cartões maiores à direita */
+        /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
+        .player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "volume volume"; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #11111b; border-top: 1px solid #313244; text-align: left; }
+        .player form { margin: 0; }
+        .player-now { grid-area: now; display: flex; gap: 10px; align-items: center; min-width: 0; }
+        .player-logo { width: 52px; height: 52px; flex: none; border-radius: 8px; object-fit: contain; background: #fff; }
+        .player-logo.empty { background: #313244; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .player-info { min-width: 0; }
+        .player-station, .player-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .player-station { font-weight: bold; font-size: 15px; }
+        .player-title { font-size: 13px; color: #a6adc8; margin-top: 2px; }
+        .player-controls { grid-area: controls; display: flex; gap: 4px; align-items: center; }
+        .player-volume { grid-area: volume; display: flex; gap: 8px; align-items: center; }
+        .icon { width: 40px; height: 40px; padding: 8px; margin: 0; border-radius: 20px; background: transparent; color: #cdd6f4; }
+        .icon svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+        .icon:hover { background: #313244; }
+        .icon:disabled { opacity: 0.35; cursor: default; background: transparent; }
+        .icon.main { width: 48px; height: 48px; padding: 12px; border-radius: 24px; background: #cdd6f4; color: #11111b; }
+        .icon.main:hover { background: #fff; transform: scale(1.05); }
+        .volbar { flex: 1; height: 6px; border-radius: 3px; background: #45475a; overflow: hidden; }
+        .volbar span { display: block; height: 100%; background: #a6e3a1; }
+        .vol-num { font-size: 12px; color: #a6adc8; min-width: 34px; text-align: right; }
+
+        /* Enquanto o script espera pelo servidor: uma linha a correr no topo */
+        body.busy { cursor: progress; }
+        body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; height: 3px; width: 40%; background: #89b4fa; animation: busy 1s ease-in-out infinite; }
+        @keyframes busy { from { transform: translateX(-100%); } to { transform: translateX(250vw); } }
+        .tile.pending .tile-play { opacity: 0.6; }
+        .toast { position: fixed; left: 50%; bottom: 140px; z-index: 30; transform: translateX(-50%); max-width: 90%; padding: 10px 16px; border-radius: 8px; background: #f38ba8; color: #11111b; font-weight: bold; font-size: 14px; }
+
+        /* PC: estações em cartões maiores e o reprodutor numa só linha */
         @media (min-width: 900px) {
-            body { max-width: 1100px; padding: 30px; }
-            .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; align-items: start; }
-            .side { position: sticky; top: 20px; }
+            body { max-width: 1100px; padding: 30px 30px 120px; }
+            .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
+            .player-logo { width: 60px; height: 60px; }
+            .player-volume { justify-self: end; width: 100%; max-width: 260px; }
             .stations { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
             .tile-name { font-size: 14px; }
             .badge-text { display: inline; }

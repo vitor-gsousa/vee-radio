@@ -8,10 +8,17 @@ import urllib.parse
 import urllib.request
 from contextlib import contextmanager
 
-from flask import Flask, Response, render_template, request, redirect
+from flask import Flask, Response, jsonify, render_template, request, redirect
 from mpd import MPDClient, MPDError
 
 app = Flask(__name__)
+
+@app.template_filter("flag")
+def flag(code):
+    # Bandeira em emoji a partir do código ISO do país (PT -> 🇵🇹)
+    if not re.fullmatch(r"[A-Za-z]{2}", code or ""):
+        return ""
+    return "".join(chr(0x1F1E6 + ord(ch) - ord("A")) for ch in code.upper())
 
 # Tem de coincidir com o playlist_directory do mpd.conf
 PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
@@ -45,6 +52,37 @@ THEMES = [
     ("kids", "Infantil"),
 ]
 THEME_LABELS = dict(THEMES)
+# Países do filtro e da janela "Países", com nome em português. A lista é fixa
+# porque a API só dá os nomes em inglês ("The United States Of America"); fica
+# Portugal e o Brasil à frente e os restantes por ordem alfabética
+COUNTRIES = [
+    ("PT", "Portugal"), ("BR", "Brasil"),
+    ("ZA", "África do Sul"), ("DE", "Alemanha"), ("AO", "Angola"), ("AR", "Argentina"), ("AU", "Austrália"),
+    ("AT", "Áustria"), ("BE", "Bélgica"), ("CV", "Cabo Verde"), ("CA", "Canadá"), ("CZ", "Chéquia"),
+    ("CL", "Chile"), ("CN", "China"), ("CO", "Colômbia"), ("KR", "Coreia do Sul"), ("CU", "Cuba"),
+    ("DK", "Dinamarca"), ("EG", "Egito"), ("ES", "Espanha"), ("US", "Estados Unidos"), ("PH", "Filipinas"),
+    ("FI", "Finlândia"), ("FR", "França"), ("GR", "Grécia"), ("HU", "Hungria"), ("IN", "Índia"),
+    ("ID", "Indonésia"), ("IE", "Irlanda"), ("IL", "Israel"), ("IT", "Itália"), ("JP", "Japão"),
+    ("LU", "Luxemburgo"), ("MA", "Marrocos"), ("MX", "México"), ("MZ", "Moçambique"), ("NG", "Nigéria"),
+    ("NO", "Noruega"), ("NZ", "Nova Zelândia"), ("NL", "Países Baixos"), ("PE", "Peru"), ("PL", "Polónia"),
+    ("GB", "Reino Unido"), ("RO", "Roménia"), ("RU", "Rússia"), ("SE", "Suécia"), ("CH", "Suíça"),
+    ("TR", "Turquia"), ("UA", "Ucrânia"), ("VE", "Venezuela"),
+]
+COUNTRY_LABELS = dict(COUNTRIES)
+# Ordenações da API (campo order, do maior para o menor); "random" serve para descobrir rádios novas
+ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "em alta"), ("random", "aleatórias")]
+ORDER_LABELS = dict(ORDERS)
+# Línguas pelo nome em inglês, como estão na API. O filtro language apanha partes
+# do nome, por isso "portuguese" inclui "brazilian portuguese"
+LANGUAGES = [
+    ("portuguese", "Português"), ("english", "Inglês"), ("spanish", "Espanhol"), ("french", "Francês"),
+    ("german", "Alemão"), ("italian", "Italiano"), ("dutch", "Neerlandês"), ("greek", "Grego"),
+    ("polish", "Polaco"), ("romanian", "Romeno"), ("russian", "Russo"), ("ukrainian", "Ucraniano"),
+    ("turkish", "Turco"), ("arabic", "Árabe"), ("hindi", "Hindi"), ("chinese", "Chinês"),
+]
+LANGUAGE_LABELS = dict(LANGUAGES)
+# Qualidade mínima do stream, em kbps (bitrateMin da API)
+BITRATES = [64, 128, 192]
 # Quantas rádios de um tema se mostram e se juntam de uma vez (as mais ouvidas)
 THEME_LIMIT = 15
 
@@ -230,7 +268,38 @@ def mpd_failed(e):
         return error_page("Esta rádio não está a responder", f"{STREAM_FAILED_HINT} ({e})", 502)
     return error_page("Erro do MPD", str(e), 500)
 
-def render_index(results=None, query="", only_pt=False, theme=None):
+def search_filters():
+    # País, língua, qualidade e ordenação vindos do formulário; valores desconhecidos ficam nos de omissão
+    country = request.args.get("pais", "")
+    language = request.args.get("lingua", "")
+    order = request.args.get("ordem", "")
+    kbps = request.args.get("kbps", "")
+    return {"pais": country if country in COUNTRY_LABELS else "",
+            "lingua": language if language in LANGUAGE_LABELS else "",
+            "kbps": int(kbps) if kbps.isdigit() and int(kbps) in BITRATES else 0,
+            "ordem": order if order in ORDER_LABELS else "clickcount"}
+
+def display_namer(info):
+    def display_name(song):
+        return info.get(song["file"], {}).get("name") or song.get("name") or song.get("title") or song["file"]
+    return display_name
+
+def player_context(status, current, info):
+    # Dados da barra do reprodutor, usados na página e no /estado
+    display_name = display_namer(info)
+    playing = status.get("state") != "stop" and bool(current.get("file"))
+    try:
+        volume = int(status.get("volume", -1))
+    except ValueError:
+        volume = -1
+    return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
+            "current_station": display_name(current) if current.get("file") else "",
+            "current_title": clean_title(current.get("title", "")),
+            "current_key": logo_key(current["file"]) if current.get("file") else "",
+            "current_pos": current.get("pos") if playing else None,
+            "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
+
+def render_index(results=None, query="", filters=None, theme=None):
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
@@ -238,25 +307,54 @@ def render_index(results=None, query="", only_pt=False, theme=None):
         stored_playlists = sorted(p['playlist'] for p in c.listplaylists())
 
     info = station_info()
-    def display_name(song):
-        return info.get(song["file"], {}).get("name") or song.get("name") or song.get("title") or song["file"]
+    display_name = display_namer(info)
+    player = player_context(status, current, info)
     stations = [{"pos": s["pos"], "name": display_name(s), "key": logo_key(s["file"]),
-                 "current": status.get("state") != "stop" and s.get("id") == current.get("id")} for s in queue]
+                 "current": s["pos"] == player["current_pos"]} for s in queue]
     playlists = [{"name": p, "count": len(read_m3u(playlist_path(p) or ""))} for p in stored_playlists]
-    current_station = display_name(current) if current.get("file") else ""
-    current_key = logo_key(current["file"]) if current.get("file") else ""
-    current_title = clean_title(current.get('title', ''))
     try:
         with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
             public_url = f.read().strip()
     except FileNotFoundError:
         public_url = ""
-    return render_template("index.html", status=status, state=STATES.get(status.get("state"), status.get("state")),
-                                  current_station=current_station, current_title=current_title, current_key=current_key,
+    return render_template("index.html", **player,
                                   stations=stations, queue_urls={s["file"] for s in queue},
                                   playlists=playlists, active=active_playlist(),
-                                  results=results, query=query, only_pt=only_pt, public_url=public_url,
-                                  themes=THEMES, theme=theme, hint=STREAM_FAILED_HINT)
+                                  results=results, query=query, filters=filters or search_filters(), public_url=public_url,
+                                  themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
+                                  bitrates=BITRATES, theme=theme,
+                                  hint=STREAM_FAILED_HINT)
+
+# Pedidos feitos pelo static/app.js. Sem JavaScript tudo continua a funcionar com
+# formulários e redirects; com ele, a página atualiza-se sem recarregar.
+def from_script():
+    return request.headers.get("X-Requested-With") == "fetch"
+
+@app.after_request
+def redirect_for_script(response):
+    # O fetch segue os redirects sozinho e perde o #janela do destino; para o
+    # script, o redirect passa a um cabeçalho e é ele que pede a página nova
+    if from_script() and response.status_code in (301, 302, 303):
+        location = response.headers["Location"]
+        response = Response(status=204)
+        response.headers["X-Location"] = location
+    return response
+
+@app.route("/estado")
+def estado():
+    # Estado do reprodutor para o script: a barra já feita em HTML (o mesmo
+    # template da página) e o que é preciso para saber se a página mudou
+    with mpd_client() as c:
+        status = c.status()
+        current = c.currentsong()
+    player = player_context(status, current, station_info())
+    return jsonify(player=render_template("player.html", **player), pos=player["current_pos"],
+                   station=player["current_station"], playing=status.get("state") == "play",
+                   queue=status.get("playlist", ""), error=status.get("error", ""))
+
+def done():
+    # Os botões do reprodutor devolvem o estado ao script, em vez da página inteira
+    return estado() if from_script() else redirect("/")
 
 @app.route("/")
 def index():
@@ -312,12 +410,16 @@ def initials_response(name):
     r.headers["Cache-Control"] = "public, max-age=3600"
     return r
 
-def find_stations(only_pt, limit, **criteria):
+def find_stations(filters, limit, **criteria):
     # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
     # Pede mais do que o limite porque os repetidos e os HLS ficam de fora.
-    params = {"limit": limit * 2, "hidebroken": "true", "order": "clickcount", "reverse": "true", **criteria}
-    if only_pt:
-        params["countrycode"] = "PT"
+    params = {"limit": limit * 2, "hidebroken": "true", "order": filters["ordem"], "reverse": "true", **criteria}
+    if filters["pais"]:
+        params["countrycode"] = filters["pais"]
+    if filters["lingua"]:
+        params["language"] = filters["lingua"]
+    if filters["kbps"]:
+        params["bitrateMin"] = filters["kbps"]
     url = "https://all.api.radio-browser.info/json/stations/search?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
@@ -342,27 +444,35 @@ API_DOWN = ("Pesquisa indisponível", "Não foi possível contactar o radio-brow
 @app.route("/search")
 def search():
     query = request.args.get("q", "").strip()
-    only_pt = request.args.get("pt") == "1"
+    filters = search_filters()
     if not query:
         return redirect("/#juntar")
     try:
-        results = find_stations(only_pt, 25, name=query)
+        results = find_stations(filters, 25, name=query)
     except (OSError, ValueError):
         # Apanhado aqui para não cair no handler de OSError, que culpa o MPD
         return error_page(*API_DOWN)
-    return render_index(results, query, only_pt)
+    return render_index(results, query, filters)
 
 @app.route("/tema")
 def theme():
+    # Um tema, um país ou os dois juntos ("Rock (Portugal)"); o nome é também o da playlist nova
     tag = request.args.get("t", "")
-    only_pt = request.args.get("pt") == "1"
-    if tag not in THEME_LABELS:
+    filters = search_filters()
+    if tag and tag not in THEME_LABELS:
         return redirect("/#temas")
+    if not tag and not filters["pais"]:
+        return redirect("/#paises")
+    criteria = {"tag": tag, "tagExact": "true"} if tag else {}
+    if tag and filters["pais"]:
+        label = f"{THEME_LABELS[tag]} ({COUNTRY_LABELS[filters['pais']]})"
+    else:
+        label = THEME_LABELS.get(tag) or COUNTRY_LABELS[filters["pais"]]
     try:
-        results = find_stations(only_pt, THEME_LIMIT, tag=tag, tagExact="true")
+        results = find_stations(filters, THEME_LIMIT, **criteria)
     except (OSError, ValueError):
         return error_page(*API_DOWN)
-    return render_index(only_pt=only_pt, theme={"tag": tag, "label": THEME_LABELS[tag], "results": results})
+    return render_index(filters=filters, theme={"tag": tag, "label": label, "results": results})
 
 @app.route("/add_theme", methods=["POST"])
 def add_theme():
@@ -404,31 +514,51 @@ def add_theme():
 def play_pos(pos):
     with mpd_client() as c:
         c.play(pos)
-    return redirect("/")
+    return done()
+
+def step(c, delta):
+    # Estação anterior ou seguinte, dando a volta no fim da lista; parado, começa pela primeira
+    length = int(c.status().get("playlistlength", "0"))
+    if not length:
+        return
+    pos = c.currentsong().get("pos")
+    c.play((int(pos) + delta) % length if pos is not None else 0)
+
+@app.route("/previous", methods=["POST"])
+def previous():
+    with mpd_client() as c:
+        step(c, -1)
+    return done()
+
+@app.route("/next", methods=["POST"])
+def next_station():
+    with mpd_client() as c:
+        step(c, +1)
+    return done()
 
 @app.route("/play", methods=["POST"])
 def play():
     with mpd_client() as c:
         c.play()
-    return redirect("/")
+    return done()
 
 @app.route("/stop", methods=["POST"])
 def stop():
     with mpd_client() as c:
         c.stop()
-    return redirect("/")
+    return done()
 
 @app.route("/volup", methods=["POST"])
 def volup():
     with mpd_client() as c:
         c.volume(+5)
-    return redirect("/")
+    return done()
 
 @app.route("/voldown", methods=["POST"])
 def voldown():
     with mpd_client() as c:
         c.volume(-5)
-    return redirect("/")
+    return done()
 
 @app.route("/add_stream", methods=["POST"])
 def add_stream():

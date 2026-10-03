@@ -2,44 +2,40 @@
 {# As janelas (modais) abrem com :target, sem JavaScript: um link para #juntar
    mostra a div com esse id e um link para #fechar esconde-a. Assim também abrem
    depois de um redirect, como /search?q=...#juntar. #}
+{# Filtros da pesquisa e dos temas: país e ordenação, que vão para o radio-browser #}
+{% macro filter_fields(country=True) %}
+    <div class="filters">
+        {% if country %}
+        <select name="pais" aria-label="País">
+            <option value="">Todos os países</option>
+            {% for code, label in countries %}<option value="{{ code }}"{% if filters.pais == code %} selected{% endif %}>{{ code|flag }} {{ label }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <select name="lingua" aria-label="Língua">
+            <option value="">Todas as línguas</option>
+            {% for key, label in languages %}<option value="{{ key }}"{% if filters.lingua == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="kbps" aria-label="Qualidade mínima">
+            <option value="">Qualquer qualidade</option>
+            {% for k in bitrates %}<option value="{{ k }}"{% if filters.kbps == k %} selected{% endif %}>{{ k }} kbps ou mais</option>{% endfor %}
+        </select>
+        <select name="ordem" aria-label="Ordenar">
+            {% for key, label in orders %}<option value="{{ key }}"{% if filters.ordem == key %} selected{% endif %}>{{ label|capitalize }}</option>{% endfor %}
+        </select>
+    </div>
+{% endmacro %}
+
 {% block body %}
     <h2>Comando de Áudio</h2>
 
-    <div class="layout">
-    <div class="side">
-    <div class="card">
-        <h3>A Tocar Agora</h3>
-        <div class="now">
-            {% if current_key %}
-            <img class="now-logo" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">
-            {% else %}
-            <div class="now-logo empty">📻</div>
-            {% endif %}
-            <div class="now-info">
-                <div class="now-station">{{ current_station or 'Nenhuma estação' }}</div>
-                {% if current_title %}<div class="now-title">{{ current_title }}</div>{% endif %}
-                <div class="meta">{{ state }}{% if status.volume and status.volume != '-1' %} · Volume {{ status.volume }}%{% endif %}</div>
-            </div>
-        </div>
-        {% if status.error %}
-        <div class="warn">
-            <strong>A última rádio não tocou.</strong> {{ hint }}
-            <div class="meta">{{ status.error }}</div>
-        </div>
-        {% endif %}
-        <div class="row controls">
-            {% if status.state == 'play' %}
-            <form action="/stop" method="post" class="grow"><button class="stop">Parar</button></form>
-            {% elif stations %}
-            <form action="/play" method="post" class="grow"><button class="btn-green">Tocar</button></form>
-            {% endif %}
-            <form action="/voldown" method="post"><button class="vol">− Vol</button></form>
-            <form action="/volup" method="post"><button class="vol">+ Vol</button></form>
-        </div>
+    {% if status.error %}
+    <div class="warn" id="aviso">
+        <strong>A última rádio não tocou.</strong> {{ hint }}
+        <div class="meta">{{ status.error }}</div>
     </div>
-    </div>
+    {% endif %}
 
-    <div class="card">
+    <div class="card" id="estacoes" data-queue="{{ status.playlist }}">
         <div class="card-head">
             <div>
                 <h3>{{ active or 'Estações' }}</h3>
@@ -49,14 +45,14 @@
         </div>
         <div class="stations">
         {% for s in stations %}
-            <div class="tile{% if s.current %} current{% endif %}">
+            <div class="tile{% if s.current %} current{% endif %}" data-pos="{{ s.pos }}">
                 <form action="/play_pos/{{ s.pos }}" method="post">
                     <button class="tile-play" title="Tocar {{ s.name }}">
                         <img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy">
                         <span class="tile-name">{{ s.name }}</span>
                     </button>
                 </form>
-                {% if s.current %}<span class="badge">▶<span class="badge-text"> A tocar</span></span>{% endif %}
+                <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text"> A tocar</span></span>
                 <form action="/remove/{{ s.pos }}" method="post" class="tile-del"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
             </div>
         {% else %}
@@ -66,11 +62,11 @@
         <div class="row">
             <a class="btn btn-green" href="#juntar">+ Juntar rádio</a>
             <a class="btn btn-blue" href="#temas">🎵 Temas</a>
+            <a class="btn btn-blue" href="#paises">🌍 Países</a>
         </div>
         {% if not active and stations %}
             <a class="btn" href="#nova">Guardar como playlist</a>
         {% endif %}
-    </div>
     </div>
 
     {% if public_url %}
@@ -136,9 +132,24 @@
             <h3>Temas</h3>
             <p class="meta">Escolhe um tema para ver as rádios mais ouvidas e juntá-las a uma playlist.</p>
             <form action="/tema#tema" method="get">
-                <label><input type="checkbox" name="pt" value="1" {% if only_pt %}checked{% endif %}> Só rádios portuguesas</label>
+                {{ filter_fields() }}
                 <div class="chips">
                     {% for tag, label in themes %}<button name="t" value="{{ tag }}">{{ label }}</button>{% endfor %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="paises">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
+            <h3>Países</h3>
+            <p class="meta">Escolhe um país para ver as suas rádios e juntá-las a uma playlist. Para um género de um país, usa os Temas.</p>
+            <form action="/tema#tema" method="get">
+                {{ filter_fields(country=False) }}
+                <div class="chips">
+                    {% for code, label in countries %}<button name="pais" value="{{ code }}">{{ code|flag }} {{ label }}</button>{% endfor %}
                 </div>
             </form>
         </div>
@@ -151,7 +162,14 @@
         <div class="modal-box">
             <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
             <h3>{{ theme.label }}</h3>
-            <p class="meta"><a href="#temas">← Temas</a> · {% if theme.results %}as {{ theme.results|length }} rádios mais ouvidas{% endif %}{% if only_pt %} portuguesas{% endif %}</p>
+            <p class="meta">{% if theme.tag %}<a href="#temas">← Temas</a>{% else %}<a href="#paises">← Países</a>{% endif %}{% if theme.results %} · as {{ theme.results|length }} rádios {{ dict(orders)[filters.ordem] }}{% endif %}</p>
+            {# Mudar o país ou a ordenação sem voltar atrás #}
+            <form action="/tema#tema" method="get" class="refine">
+                {% if theme.tag %}<input type="hidden" name="t" value="{{ theme.tag }}">{% endif %}
+                {{ filter_fields(country=theme.tag) }}
+                {% if not theme.tag %}<input type="hidden" name="pais" value="{{ filters.pais }}">{% endif %}
+                <button>Atualizar</button>
+            </form>
             {% if theme.results %}
             <form action="/add_theme" method="post" class="theme-add">
                 <input type="hidden" name="label" value="{{ theme.label }}">
@@ -191,11 +209,11 @@
                         <button class="result-btn">+ {{ r.name }}</button>
                     </form>
                     {% endif %}
-                    <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}</div>
+                    <div class="meta">{{ r.countrycode|flag }} {{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}</div>
                 </div>
             </div>
             {% else %}
-            <p>Não há rádios neste tema{% if only_pt %} em Portugal. Experimenta sem «Só rádios portuguesas»{% endif %}.</p>
+            <p>Não há rádios {% if theme.tag and filters.pais %}deste tema neste país. Experimenta «Todos os países»{% else %}aqui{% endif %}.</p>
             {% endfor %}
         </div>
     </div>
@@ -208,7 +226,7 @@
             <h3>Juntar rádio{% if active %} a «{{ active }}»{% endif %}</h3>
             <form action="/search#juntar" method="get">
                 <input type="text" name="q" value="{{ query }}" placeholder="Nome da rádio (ex: Comercial, jazz)" required>
-                <label><input type="checkbox" name="pt" value="1" {% if only_pt %}checked{% endif %}> Só rádios portuguesas</label>
+                {{ filter_fields() }}
                 <button class="btn-blue">Procurar</button>
             </form>
             {% if results is not none %}
@@ -228,7 +246,7 @@
                             <button class="result-btn">+ {{ r.name }}</button>
                         </form>
                         {% endif %}
-                        <div class="meta">{{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
+                        <div class="meta">{{ r.countrycode|flag }} {{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
                     </div>
                 </div>
                 {% else %}
@@ -244,4 +262,6 @@
             </form>
         </div>
     </div>
+
+    {% include "player.html" %}
 {% endblock %}

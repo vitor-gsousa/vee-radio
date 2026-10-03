@@ -1,0 +1,38 @@
+{# Barra do reprodutor fixa no fundo, como no Spotify: estação à esquerda,
+   controlos ao centro e volume à direita (no telemóvel, o volume desce para uma segunda linha) #}
+<footer class="player" data-sig="{{ [current_station, current_title, current_key, status.state, volume, has_stations]|join('|') }}">
+    <div class="player-now">
+        {% if current_key %}
+        <img class="player-logo" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">
+        {% else %}
+        <div class="player-logo empty">📻</div>
+        {% endif %}
+        <div class="player-info">
+            <div class="player-station">{{ current_station or 'Nenhuma estação' }}</div>
+            <div class="player-title">{{ current_title or state }}</div>
+        </div>
+    </div>
+    <div class="player-controls">
+        <form action="/previous" method="post"><button class="icon" title="Estação anterior" aria-label="Estação anterior"{% if not has_stations %} disabled{% endif %}>
+            <svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button></form>
+        {% if status.state == 'play' %}
+        <form action="/stop" method="post"><button class="icon main" title="Parar" aria-label="Parar">
+            <svg viewBox="0 0 24 24"><path d="M7 7h10v10H7z"/></svg></button></form>
+        {% else %}
+        <form action="/play" method="post"><button class="icon main" title="Tocar" aria-label="Tocar"{% if not has_stations %} disabled{% endif %}>
+            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button></form>
+        {% endif %}
+        <form action="/next" method="post"><button class="icon" title="Estação seguinte" aria-label="Estação seguinte"{% if not has_stations %} disabled{% endif %}>
+            <svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button></form>
+    </div>
+    <div class="player-volume">
+        <form action="/voldown" method="post"><button class="icon" title="Baixar o volume" aria-label="Baixar o volume">
+            <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM15 11h6v2h-6z"/></svg></button></form>
+        {% if volume >= 0 %}
+        <div class="volbar" title="Volume {{ volume }}%"><span style="width: {{ volume }}%"></span></div>
+        <span class="vol-num">{{ volume }}%</span>
+        {% endif %}
+        <form action="/volup" method="post"><button class="icon" title="Subir o volume" aria-label="Subir o volume">
+            <svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 11h2V9h2v2h2v2h-2v2h-2v-2h-2z"/></svg></button></form>
+    </div>
+</footer>

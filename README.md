@@ -11,6 +11,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `templates/` | Páginas do comando web; no telemóvel ficam numa coluna e no PC em duas |
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
+| `.env.example` | Modelo da configuração local (tópico do ntfy); a cópia `.env` não vai para o git |
 | `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
 ## Requisitos
@@ -53,6 +54,22 @@ Ativa o wake lock do Android, inicia o MPD, volta a carregar a última playlist 
 Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux, fica em `~/tunnel-url.txt` e é mostrado no fundo do comando web. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
 
 O link muda sempre que o `start.sh` corre.
+
+### Receber o link por notificação (ntfy)
+
+Para não teres de pegar no telemóvel da rádio, o `start.sh` pode enviar o link para um tópico do [ntfy](https://ntfy.sh). Instala a app ntfy no teu telemóvel, subscreve um tópico e escreve-o no ficheiro `~/vee-radio/.env` (o `install.sh` cria-o a partir do `.env.example`):
+
+```bash
+nano ~/vee-radio/.env
+```
+
+```
+NTFY_TOPIC_URL=vee-radio-um-nome-dificil-de-adivinhar
+```
+
+Pode ser só o nome do tópico (usa o servidor público `ntfy.sh`) ou o endereço completo de outro servidor (`https://ntfy.exemplo.pt/radio`). Para tópicos com autenticação, define também `NTFY_TOKEN`. A partir daí, sempre que a rádio arranca (também pelo Termux:Boot) chega uma notificação com o link, e tocar nela abre o comando. A página de partilha deixa de abrir; só volta a abrir se o envio falhar.
+
+No `ntfy.sh` qualquer pessoa que saiba o nome do tópico recebe o link, e quem tem o link controla a rádio. Usa um nome difícil de adivinhar.
 
 ```bash
 ~/stop.sh

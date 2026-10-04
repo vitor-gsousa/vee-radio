@@ -23,7 +23,7 @@ main() {
     # apt-get e não pkg: o "pkg update" também atualiza os pacotes, mas sem as opções acima
     apt-get update </dev/null
     apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
-    apt-get "${APT_OPTS[@]}" install mpd mpc python git nano ffmpeg libcurl ca-certificates cloudflared </dev/null
+    apt-get "${APT_OPTS[@]}" install mpd mpc python git nano ffmpeg curl libcurl ca-certificates cloudflared </dev/null
 
     echo "=== 2. A instalar bibliotecas Python ==="
     pip install flask python-mpd2
@@ -48,6 +48,10 @@ main() {
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
     chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh"
+    # Configuração local (tópico do ntfy); nunca se substitui um .env que já exista
+    if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
+        cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+    fi
     echo "=== 5. A configurar o MPD ==="
     mkdir -p ~/.config/mpd/playlists
     if [ -f ~/.config/mpd/mpd.conf ] && [ ! -L ~/.config/mpd/mpd.conf ]; then
@@ -78,6 +82,7 @@ BOOT
     echo "=== Instalação concluída! ==="
     echo "Para arrancar a jukebox: ~/start.sh"
     echo "Para arrancar sozinha quando o telemóvel liga, instala a app Termux:Boot (F-Droid) e abre-a uma vez."
+    echo "Para receber o link por notificação (ntfy), define o tópico em $INSTALL_DIR/.env"
 }
 
 main "$@"

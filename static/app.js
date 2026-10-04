@@ -277,8 +277,21 @@
         currentPath = location.pathname + location.search;
     }
 
+    // O ✕ das caixas de pesquisa limpa a caixa em vez de seguir o link
+    document.addEventListener("click", function (e) {
+        var clear = e.target.closest(".search-clear");
+        if (!clear) return;
+        e.preventDefault();
+        var input = clear.parentNode.querySelector("input");
+        input.value = "";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+    });
+
     document.addEventListener("input", function (e) {
         var t = e.target;
+        var clear = t.parentNode && t.parentNode.querySelector(".search-clear");
+        if (clear) clear.hidden = !t.value;
         if (t.matches(".list-tools input")) return filterList(t);
         // Procurar rádios enquanto se escreve
         if (t.matches('#juntar input[name="q"]')) {

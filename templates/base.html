@@ -29,12 +29,18 @@
         .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .playing { background: #45475a; outline: 2px solid #a6e3a1; }
         [hidden] { display: none !important; }
+        /* Caixa de pesquisa com o ✕ por dentro, à direita; o ✕ nativo do Chrome fica escondido */
+        .search-box { position: relative; display: block; flex: 1; min-width: 0; }
+        .search-box input { padding-right: 40px; }
+        .search-box input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+        .search-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; line-height: 28px; text-align: center; border-radius: 14px; color: #a6adc8; text-decoration: none; font-size: 14px; }
+        .search-clear:hover { background: #45475a; color: #cdd6f4; }
         input[type="text"], input[type="search"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
         .card { background: #181825; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
         .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
         /* Procurar e ordenar a lista: numa linha própria no telemóvel, ao lado do título no PC */
         .list-tools { order: 3; flex-basis: 100%; display: flex; gap: 6px; align-items: center; }
-        .list-tools input { flex: 1; min-width: 0; margin: 0; }
+        .list-tools input { margin: 0; }
         .list-tools select { width: auto; margin: 0; }
         .list-tools button { width: auto; margin: 0; padding: 10px 14px; }
         .card-head .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; }

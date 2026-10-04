@@ -9,6 +9,15 @@
         </select>
 {% endmacro %}
 
+{# Caixa de pesquisa com um ✕ para a limpar. Sem JavaScript, o ✕ é um link para
+   a mesma página sem o texto; com ele, limpa a caixa e fica lá o cursor #}
+{% macro search_box(name, value, placeholder, clear_href, required=False) %}
+        <span class="search-box">
+            <input type="search" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}" aria-label="{{ placeholder }}"{% if required %} required{% endif %}>
+            <a class="search-clear" href="{{ clear_href }}" title="Limpar" aria-label="Limpar"{% if not value %} hidden{% endif %}>✕</a>
+        </span>
+{% endmacro %}
+
 {# Filtros da pesquisa e dos temas: país, língua, qualidade e ordenação, que vão para o radio-browser #}
 {% macro filter_fields(country=True) %}
     <div class="filters">
@@ -57,7 +66,7 @@
             {% if stations|length > 1 %}
             {# Sem JavaScript filtra com Enter e ordena com o OK; com ele, filtra enquanto se escreve #}
             <form class="list-tools" action="/" method="get" role="search">
-                <input type="search" name="filtro" value="{{ list_filter }}" placeholder="Procurar nesta lista" aria-label="Procurar nesta lista">
+                {{ search_box("filtro", list_filter, "Procurar nesta lista", "/?ordenar=" ~ list_order if list_order else "/") }}
                 {{ order_select("ordenar", list_orders, list_order) }}
                 <noscript><button>OK</button></noscript>
             </form>
@@ -250,7 +259,7 @@
             <a class="btn close" href="#fechar" aria-label="Fechar">✕</a>
             <h3>Juntar rádio{% if active %} a «{{ active }}»{% endif %}</h3>
             <form action="/search#juntar" method="get">
-                <input type="text" name="q" value="{{ query }}" placeholder="Nome da rádio (ex: Comercial, jazz)" required>
+                {{ search_box("q", query, "Nome da rádio (ex: Comercial, jazz)", "/#juntar", required=True) }}
                 {{ filter_fields() }}
                 <button class="btn-blue">Procurar</button>
             </form>

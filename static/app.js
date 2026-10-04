@@ -16,6 +16,9 @@
     // Cada pedido de página tem um número; uma resposta que chega depois de um
     // pedido mais recente (por exemplo, ao escrever na pesquisa) é ignorada
     var loadSeq = 0;
+    // O mesmo para o estado do reprodutor: o /estado do polling pedido antes de um
+    // clique (parar, mudar de estação) não pode chegar depois e desfazê-lo na barra
+    var stateSeq = 0;
     var searchTimer = null;
 
     function setBusy(on) {
@@ -216,6 +219,8 @@
             return;
         }
         if (tile) tile.classList.add("pending");
+        // A resposta de um /estado pedido antes deste envio é descartada
+        stateSeq++;
         setBusy(true);
         try {
             await handle(await fetch(action.pathname + action.search, { method: "POST", body: data, headers: HEADERS }));
@@ -266,8 +271,11 @@
 
     async function poll() {
         if (document.hidden || busy || !document.querySelector(".player")) return;
+        var seq = ++stateSeq;
         try {
             var response = await fetch("/estado", { headers: HEADERS });
+            // Entretanto carregou-se num botão: este estado é de antes e já não vale
+            if (seq !== stateSeq) return;
             if (response.ok) updatePlayer(await response.json());
         } catch (e) {
             // Sem rede: tenta outra vez no próximo ciclo
@@ -276,7 +284,7 @@
 
     // Sem acentos nem maiúsculas, como o plain_text do servidor
     function plain(text) {
-        return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+        return text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
     }
 
     // Filtra a lista de estações enquanto se escreve. As escondidas já vêm na

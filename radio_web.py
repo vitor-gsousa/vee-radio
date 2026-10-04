@@ -256,9 +256,24 @@ def fetch(url, limit):
 def api_get(path, **params):
     return json.loads(fetch(API + path + "?" + urllib.parse.urlencode(params), 4 * 1024 * 1024))
 
+def api_stations(path, **params):
+    # Lista de estações da API. Uma resposta que não é uma lista (um erro em JSON)
+    # passa a ValueError, como o JSON inválido, e as entradas estranhas ficam de fora
+    found = api_get(path, **params)
+    if not isinstance(found, list):
+        raise ValueError(f"resposta inesperada do radio-browser em {path}")
+    return [st for st in found if isinstance(st, dict)]
+
+def to_int(value):
+    # Números da API, que podem vir a null ou noutro formato
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
 def lookup_logo(stream_url):
     # Só procura pelo URL exato do stream: pelo nome aparecem rádios de outros países
-    for s in api_get("/json/stations/byurl", url=stream_url):
+    for s in api_stations("/json/stations/byurl", url=stream_url):
         if LOGO_URL_RE.match(s.get("favicon") or ""):
             return s["favicon"]
     return None
@@ -294,17 +309,17 @@ def merge_stats(updates):
 def stat_entry(station):
     # Números e detalhes da rádio para a lista e para a barra do reprodutor
     tags = []
-    for tag in (station.get("tags") or "").split(","):
+    for tag in str(station.get("tags") or "").split(","):
         tag = " ".join(tag.split())[:20]
         if tag and tag.lower() not in (t.lower() for t in tags):
             tags.append(tag)
     homepage = station.get("homepage") or ""
     return {"v": STATS_VERSION, "uuid": station.get("stationuuid"), "t": time.time(),
-            "clickcount": int(station.get("clickcount") or 0), "votes": int(station.get("votes") or 0),
-            "clicktrend": int(station.get("clicktrend") or 0),
+            "clickcount": to_int(station.get("clickcount")), "votes": to_int(station.get("votes")),
+            "clicktrend": to_int(station.get("clicktrend")),
             "countrycode": (station.get("countrycode") or "").upper(), "tags": tags[:3],
             "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
-            "codec": station.get("codec") or "", "bitrate": int(station.get("bitrate") or 0)}
+            "codec": station.get("codec") or "", "bitrate": to_int(station.get("bitrate"))}
 
 def stats_stale(entry, now):
     return now - entry.get("t", 0) > STATS_MAX_AGE or entry.get("v") != STATS_VERSION
@@ -334,7 +349,7 @@ def station_stats(urls):
     uuids = list(by_uuid)
     for i in range(0, len(uuids), 100):
         try:
-            for st in api_get("/json/stations/byuuid", uuids=",".join(uuids[i:i + 100])):
+            for st in api_stations("/json/stations/byuuid", uuids=",".join(uuids[i:i + 100])):
                 if st.get("stationuuid") in by_uuid:
                     updates[by_uuid[st["stationuuid"]]] = stat_entry(st)
         except OSError:
@@ -348,14 +363,14 @@ def station_stats(urls):
         if api_down.is_set():
             return url, retry
         try:
-            found = api_get("/json/stations/byurl", url=url)
+            found = api_stations("/json/stations/byurl", url=url)
         except OSError:
             api_down.set()
             return url, retry
         except ValueError:
             return url, retry
         # A mesma rádio aparece várias vezes; fica a mais ouvida
-        best = max(found, key=lambda st: int(st.get("clickcount") or 0), default=None)
+        best = max(found, key=lambda st: to_int(st.get("clickcount")), default=None)
         return url, stat_entry(best) if best else {"v": STATS_VERSION, "uuid": None, "clickcount": 0, "votes": 0, "t": now}
     missing = stale()
     if missing:
@@ -671,15 +686,23 @@ def find_stations(filters, limit, **criteria):
     # (.m3u8) ficam de fora porque o MPD nem sempre os consegue tocar; quase todas
     # as rádios têm também um stream normal.
     seen, results = set(), []
+    if not isinstance(stations, list):
+        raise ValueError("resposta inesperada do radio-browser")
     for s in stations:
-        if s.get("hls") or ".m3u8" in s.get("url_resolved", ""):
+        # Os campos podem vir a null: sem URL a rádio fica de fora, o resto fica vazio
+        if not isinstance(s, dict):
             continue
-        if s.get("url_resolved") and s["url_resolved"] not in seen:
-            seen.add(s["url_resolved"])
-            if not LOGO_URL_RE.match(s.get("favicon") or ""):
-                s["favicon"] = ""
-            s["name"] = " ".join(s.get("name", "").split())
-            results.append(s)
+        url = s.get("url_resolved") or ""
+        if not safe_url(url) or s.get("hls") or ".m3u8" in url or url in seen:
+            continue
+        seen.add(url)
+        s["url_resolved"] = url
+        if not LOGO_URL_RE.match(s.get("favicon") or ""):
+            s["favicon"] = ""
+        s["name"] = " ".join(str(s.get("name") or "").split())
+        s["tags"] = str(s.get("tags") or "")
+        s["stationuuid"] = s.get("stationuuid") or ""
+        results.append(s)
     if filters["ordem"] == "name":
         # A API ordena os nomes tal como estão, com espaços e pontuação à frente
         # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas
@@ -687,8 +710,10 @@ def find_stations(filters, limit, **criteria):
     return results[:limit]
 
 def plain_text(text):
-    # Sem acentos nem maiúsculas, para comparar e ordenar nomes
-    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch)).casefold()
+    # Sem acentos nem maiúsculas, para comparar e ordenar nomes. Tem de dar o mesmo
+    # que o plain() do static/app.js (NFKD, sem \p{M}, toLowerCase), senão o filtro
+    # da lista mostra estações diferentes ao abrir a página e ao escrever
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.category(ch).startswith("M")).lower()
 
 def sort_key(name):
     return re.sub(r"^\W+", "", plain_text(name))
@@ -868,8 +893,10 @@ def add_stream():
                 except FileNotFoundError:
                     pass
             with mpd_client() as c:
-                c.add(url)
-                sync_active(c)
+                # Dois toques em "+ Rádio" (ou dois aparelhos) não a juntam duas vezes
+                if url not in {s["file"] for s in c.playlistinfo()}:
+                    c.add(url)
+                    sync_active(c)
     return back()
 
 @app.route("/remove/<int:song_id>", methods=["POST"])

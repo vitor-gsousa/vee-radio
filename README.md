@@ -51,7 +51,7 @@ Variáveis opcionais:
 
 Ativa o wake lock do Android, inicia o MPD, volta a carregar a última playlist ativa se a fila estiver vazia, e arranca o servidor web e o Cloudflare Tunnel em segundo plano. Depois disso já podes fechar o Termux.
 
-Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux, fica em `~/tunnel-url.txt` e é mostrado no fundo do comando web. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
+Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link `https://*.trycloudflare.com` e os botões **Copiar link** e **Partilhar…**, para o enviares por mensagem a quem quiseres. Essa página está em `http://localhost:8081` e só se abre no próprio telemóvel. O link também aparece no Termux e fica em `~/tunnel-url.txt`, mas não aparece no comando web: é a chave de acesso. Na rede local também podes usar `http://<IP-do-telemóvel>:8080`.
 
 O link muda sempre que o `start.sh` corre.
 
@@ -69,7 +69,7 @@ NTFY_TOPIC_URL=vee-radio-um-nome-dificil-de-adivinhar
 
 Pode ser só o nome do tópico (usa o servidor público `ntfy.sh`) ou o endereço completo de outro servidor (`https://ntfy.exemplo.pt/radio`). Para tópicos com autenticação, define também `NTFY_TOKEN`. A partir daí, sempre que a rádio arranca (também pelo Termux:Boot) chega uma notificação com o link, e tocar nela abre o comando. A página de partilha deixa de abrir; só volta a abrir se o envio falhar.
 
-No `ntfy.sh` qualquer pessoa que saiba o nome do tópico recebe o link, e quem tem o link controla a rádio. Usa um nome difícil de adivinhar.
+No `ntfy.sh` qualquer pessoa que saiba o nome do tópico recebe o link, e quem tem o link controla a rádio. Usa um nome difícil de adivinhar: sem `NTFY_TOKEN`, o `start.sh` recusa tópicos do `ntfy.sh` com menos de 16 caracteres e sugere um.
 
 ```bash
 ~/stop.sh

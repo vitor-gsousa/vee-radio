@@ -11,6 +11,19 @@ env_value() {
         sed "s/[[:space:]]*\$//; s/^[\"']//; s/[\"']\$//"
 }
 
+# curl com o token do ntfy (se houver) num ficheiro de configuração lido por um
+# descritor, e não na linha de comando, onde ficaria visível na lista de processos.
+# O <(...) tem de estar no próprio comando: guardado numa variável já vem fechado
+ntfy_curl() {
+    local token="$1"
+    shift
+    if [ -n "$token" ]; then
+        curl -K <(printf 'header = "Authorization: Bearer %s"\n' "$token") "$@"
+    else
+        curl "$@"
+    fi
+}
+
 # Envia o link para o tópico do ntfy; falha se não houver tópico ou se o envio não correr bem
 send_ntfy() {
     local topic token
@@ -22,11 +35,22 @@ send_ntfy() {
         http://*|https://*) ;;
         *) topic="https://ntfy.sh/$topic" ;;
     esac
-    local auth=()
-    [ -n "$token" ] && auth=(-H "Authorization: Bearer $token")
+    # No ntfy.sh público, quem souber o tópico recebe o link e controla a rádio:
+    # sem token, um nome curto (fácil de adivinhar) não é usado
+    local name="${topic%/}"
+    name="${name##*/}"
+    case "$topic" in
+        https://ntfy.sh/*|http://ntfy.sh/*)
+            if [ -z "$token" ] && [ "${#name}" -lt 16 ]; then
+                echo "O tópico do ntfy \"$name\" é curto demais para o ntfy.sh público (mínimo 16 caracteres)."
+                echo "Escolhe um nome difícil de adivinhar no .env, por exemplo: radio-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+                return 1
+            fi
+            ;;
+    esac
     # Os cabeçalhos vão só em ASCII. O texto vai pelo stdin, em bytes: se não
     # chegar em UTF-8, o ntfy mostra-o como um anexo em vez da mensagem
-    printf 'Link do comando da rádio: %s' "$1" | curl -fsS --max-time 15 -o /dev/null "${auth[@]}" \
+    printf 'Link do comando da rádio: %s' "$1" | ntfy_curl "$token" -fsS --max-time 15 -o /dev/null \
         -H "Title: Vee Radio" \
         -H "Tags: radio" \
         -H "Click: $1" \

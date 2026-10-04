@@ -1,5 +1,6 @@
 import hashlib
 import html
+import http.client
 import ipaddress
 import json
 import os
@@ -24,6 +25,8 @@ class BigFormRequest(Request):
 
 app = Flask(__name__)
 app.request_class = BigFormRequest
+# "Juntar todas" com ALL_LIMIT rádios fica bem abaixo disto; acima é abuso
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 @app.template_filter("flag")
 def flag(code):
@@ -38,7 +41,8 @@ PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
 NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
 # Playlist que está carregada na fila; o start.sh volta a carregá-la se a fila estiver vazia
 ACTIVE_FILE = os.path.expanduser("~/.config/mpd/playlist-ativa.txt")
-# Escrito pelo start.sh com o link do Cloudflare Tunnel
+# Escrito pelo start.sh com o link do Cloudflare Tunnel. Não aparece na página (é a
+# chave de acesso e chega por ntfy ou pela página local); só serve para validar o Origin
 TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
 # Logótipos descarregados, um ficheiro por stream
 LOGO_DIR = os.path.expanduser("~/.cache/vee-radio/logos")
@@ -188,15 +192,27 @@ CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 # Music e outros protocolos do MPD (smb://, nfs://) chegavam à rede local
 STREAM_URL_RE = re.compile(r"^https?://\S+$", re.I)
 
+# Tamanhos máximos do que vem dos formulários: o nome da playlist é um nome de
+# ficheiro (255 bytes no máximo) e o resto vai para os .m3u, que são lidos a cada pedido
+MAX_URL = 2048
+MAX_NAME = 200
+MAX_PLAYLIST_BYTES = 200
+
 def safe_url(url):
-    return bool(url) and bool(STREAM_URL_RE.match(url)) and not CONTROL_RE.search(url)
+    return bool(url) and len(url) <= MAX_URL and bool(STREAM_URL_RE.match(url)) and not CONTROL_RE.search(url)
+
+def clean_name(name):
+    # Junta espaços e quebras de linha para o nome não partir o formato m3u
+    return " ".join((name or "").split())[:MAX_NAME]
 
 def playlist_path(name):
-    if not name or "/" in name or "\\" in name or name.startswith(".") or CONTROL_RE.search(name):
+    if not name or "/" in name or "\\" in name or name.startswith(".") or CONTROL_RE.search(name) \
+            or len(name.encode("utf-8")) > MAX_PLAYLIST_BYTES:
         return None
     return os.path.join(PLAYLIST_DIR, name + ".m3u")
 
-BAD_NAME = ("Nome inválido", "O nome da playlist não pode ter / nem \\ nem quebras de linha, nem começar por ponto.", 400)
+BAD_NAME = ("Nome inválido", "O nome da playlist não pode ter / nem \\ nem quebras de linha, nem começar por ponto, "
+            "e tem de ser curto.", 400)
 
 # Juntar, remover e trocar de playlist leem a fila e reescrevem os .m3u: dois
 # pedidos ao mesmo tempo (vários comandos abertos) não se podem misturar
@@ -262,31 +278,54 @@ def fetch(url, limit):
     with urllib.request.urlopen(req, timeout=8) as r:
         return r.read(limit + 1)
 
-def public_host(url):
-    # Os logótipos vêm de endereços escritos por quem usa o link público: o
-    # telemóvel não pode ir buscá-los à rede local (router, MPD, a própria app)
-    parts = urllib.parse.urlsplit(url)
-    if parts.scheme not in ("http", "https") or not parts.hostname:
-        return False
-    try:
-        addresses = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80),
-                                       type=socket.SOCK_STREAM)
-    except (OSError, UnicodeError, ValueError):
-        return False
-    return all(ipaddress.ip_address(a[4][0].split("%")[0]).is_global for a in addresses)
+# Os logótipos vêm de endereços escritos por quem usa o link público: o telemóvel
+# não pode ir buscá-los à rede local (router, MPD, a própria app). O endereço é
+# verificado no momento de ligar, e a ligação é feita ao IP verificado: verificar
+# antes e deixar o urllib resolver outra vez deixava um DNS trocar o IP pelo meio
+def public_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None, **kwargs):
+    host, port = address[:2]
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    for info in infos:
+        if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+            # ValueError e não OSError: o logótipo fica como falhado por um dia, e não
+            # como falha de rede, que voltava a tentar ao fim de uma hora
+            raise ValueError(f"endereço não público: {host}")
+    return socket.create_connection(infos[0][4][:2], timeout, source_address)
+
+class PublicHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = public_connection
+
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    # O TLS continua a usar o nome do servidor (SNI e certificado), só a ligação vai ao IP verificado
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = public_connection
+
+class PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(PublicHTTPConnection, req)
+
+class PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(PublicHTTPSConnection, req, context=self._context)
 
 class PublicRedirects(urllib.request.HTTPRedirectHandler):
-    # Um logótipo público que redireciona para a rede local também é recusado
+    # Os redirecionamentos passam pelas mesmas ligações; aqui só se recusa sair do
+    # http(s), porque o urllib também seguiria para ftp://
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not public_host(newurl):
-            raise urllib.error.URLError(f"redirecionamento para um endereço não público: {newurl}")
+        if urllib.parse.urlsplit(newurl).scheme not in ("http", "https"):
+            raise urllib.error.URLError(f"redirecionamento recusado: {newurl}")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
-_public_opener = urllib.request.build_opener(PublicRedirects)
+# Sem proxies do ambiente: a verificação tem de ser feita ao destino e não ao proxy
+_public_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), PublicHTTPHandler,
+                                             PublicHTTPSHandler, PublicRedirects)
 
 def fetch_public(url, limit):
-    if not public_host(url):
-        raise ValueError(f"endereço não público: {url}")
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        raise ValueError(f"endereço recusado: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
     with _public_opener.open(req, timeout=8) as r:
         return r.read(limit + 1)
@@ -580,20 +619,56 @@ def render_index(results=None, query="", filters=None, theme=None):
     elif list_order in ("name", "-name"):
         stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
     playlists = [{"name": p, "count": len(read_m3u(playlist_path(p) or ""))} for p in stored_playlists]
-    try:
-        with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
-            public_url = f.read().strip()
-    except FileNotFoundError:
-        public_url = ""
     return render_template("index.html", **player,
                                   stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
                                   playlists=playlists, active=active_playlist(),
-                                  results=results, query=query, filters=filters or search_filters(), public_url=public_url,
+                                  results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme,
                                   hint=STREAM_FAILED_HINT)
+
+def tunnel_host():
+    try:
+        with open(TUNNEL_URL_FILE, encoding="utf-8") as f:
+            return urllib.parse.urlsplit(f.read().strip()).hostname or ""
+    except FileNotFoundError:
+        return ""
+
+def known_host(hostname):
+    # DNS rebinding: uma página de outro domínio que passe a apontar para o IP do
+    # telemóvel chega aqui com o Host desse domínio. Só se aceita localhost, um IP
+    # (na rede local, http://<IP>:8080) e o túnel; os nomes *.trycloudflare.com
+    # são da Cloudflare e não podem apontar para a rede local
+    if hostname in ("localhost", tunnel_host()) or hostname.endswith(".trycloudflare.com"):
+        return True
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        return False
+
+@app.before_request
+def check_origin():
+    hostname = urllib.parse.urlsplit("//" + request.host).hostname or ""
+    if not known_host(hostname):
+        return error_page("Endereço desconhecido", "Abre o comando pelo link do túnel ou pelo IP do telemóvel.", 400)
+    if request.method != "POST":
+        return None
+    # CSRF: uma página de outro site, aberta por alguém na mesma rede ou com o
+    # link, não pode carregar nos botões. O Sec-Fetch-Site é a resposta do próprio
+    # browser; os browsers que não o mandam mandam o Origin, que tem de ser este
+    # endereço ou o do túnel (o cloudflared pode reescrever o Host para localhost)
+    site = request.headers.get("Sec-Fetch-Site")
+    if site:
+        allowed = site in ("same-origin", "none")
+    else:
+        origin = request.headers.get("Origin")
+        allowed = origin is None or urllib.parse.urlsplit(origin).netloc in (request.host, tunnel_host())
+    if not allowed:
+        return error_page("Pedido recusado", "Este pedido veio de outro site.", 403)
+    return None
 
 # Pedidos feitos pelo static/app.js. Sem JavaScript tudo continua a funcionar com
 # formulários e redirects; com ele, a página atualiza-se sem recarregar.
@@ -807,7 +882,7 @@ def add_theme():
         existed = os.path.isfile(path)
         entries = read_m3u(path)
         known = {u for u, _, _ in entries}
-        new = [(u, " ".join(n.split()) or None, l) for u, n, l in picked if safe_url(u) and u not in known]
+        new = [(u, clean_name(n) or None, l) for u, n, l in picked if safe_url(u) and u not in known]
         if target == active_playlist():
             # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
             # antes para a sincronização encontrar os nomes e logótipos das novas.
@@ -910,18 +985,21 @@ def voldown():
 @app.route("/add_stream", methods=["POST"])
 def add_stream():
     url = request.form.get("url", "").strip()
-    # Junta espaços e quebras de linha para o nome não partir o formato m3u
-    name = " ".join(request.form.get("name", "").split())
+    name = clean_name(request.form.get("name", ""))
     logo = request.form.get("logo", "").strip()
     if not LOGO_URL_RE.match(logo):
         logo = ""
     if url and not safe_url(url):
-        return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https:// e não pode ter quebras de linha.", 400)
+        return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://, "
+                          "não pode ter quebras de linha e tem de ter menos de 2048 caracteres.", 400)
     if url:
         remember_uuids([(url, request.form.get("uuid", ""))])
         with QUEUE_LOCK:
-            # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele
-            if name or logo:
+            # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele.
+            # Só se escreve se mudar alguma coisa: o ficheiro é lido a cada pedido e
+            # não pode crescer com cada vez que se junta a mesma rádio
+            known = {u: (n, l) for u, n, l in read_m3u(NAMES_FILE)}
+            if (name or logo) and known.get(url) != (name or None, logo or None):
                 with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
                     f.write(extinf(name, logo) + url + "\n")
             if logo:

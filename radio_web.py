@@ -6,6 +6,7 @@ import re
 import threading
 import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -326,6 +327,9 @@ def station_stats(urls):
     updates = {}
     def stale():
         return [u for u in urls if u not in updates and stats_stale(stats.get(u, {}), now)]
+    # Depois de uma falha de rede não se pede mais nada: com a API em baixo, cada
+    # pedido esperava pelo timeout e ordenar uma lista grande demorava minutos
+    api_down = threading.Event()
     by_uuid = {stats[u]["uuid"]: u for u in stale() if stats.get(u, {}).get("uuid")}
     uuids = list(by_uuid)
     for i in range(0, len(uuids), 100):
@@ -333,14 +337,23 @@ def station_stats(urls):
             for st in api_get("/json/stations/byuuid", uuids=",".join(uuids[i:i + 100])):
                 if st.get("stationuuid") in by_uuid:
                     updates[by_uuid[st["stationuuid"]]] = stat_entry(st)
-        except (OSError, ValueError):
+        except OSError:
+            api_down.set()
+            break
+        except ValueError:
             break
     def lookup(url):
         old = stats.get(url, {"uuid": None, "clickcount": 0, "votes": 0})
+        retry = {**old, "v": STATS_VERSION, "t": now - STATS_MAX_AGE + STATS_RETRY_SECONDS}
+        if api_down.is_set():
+            return url, retry
         try:
             found = api_get("/json/stations/byurl", url=url)
-        except (OSError, ValueError):
-            return url, {**old, "v": STATS_VERSION, "t": now - STATS_MAX_AGE + STATS_RETRY_SECONDS}
+        except OSError:
+            api_down.set()
+            return url, retry
+        except ValueError:
+            return url, retry
         # A mesma rádio aparece várias vezes; fica a mais ouvida
         best = max(found, key=lambda st: int(st.get("clickcount") or 0), default=None)
         return url, stat_entry(best) if best else {"v": STATS_VERSION, "uuid": None, "clickcount": 0, "votes": 0, "t": now}
@@ -474,6 +487,12 @@ def player_context(status, current, info):
             "current_pos": current.get("pos") if playing else None,
             "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
 
+def queue_sig(queue):
+    # Muda só quando se juntam, removem ou trocam estações. A versão da fila do
+    # MPD (status.playlist) também muda quando o stream a tocar muda de música,
+    # e o script recarregava a página a cada música
+    return hashlib.sha1(",".join(s["id"] for s in queue).encode()).hexdigest()[:12]
+
 def render_index(results=None, query="", filters=None, theme=None):
     with mpd_client() as c:
         status = c.status()
@@ -488,6 +507,12 @@ def render_index(results=None, query="", filters=None, theme=None):
     # para o script as poder mostrar enquanto se escreve, sem pedir outra vez
     list_filter = request.args.get("filtro", "").strip()
     list_order = request.args.get("ordenar", "")
+    if list_order not in dict(LIST_ORDERS):
+        list_order = ""
+    # Para onde voltam os cartões depois de tocar ou remover: a lista com o mesmo
+    # filtro, e nunca /search ou /tema, que voltariam a pedir tudo à API
+    list_params = {k: v for k, v in (("filtro", list_filter), ("ordenar", list_order)) if v}
+    list_url = "/" + ("?" + urllib.parse.urlencode(list_params) if list_params else "")
     wanted = plain_text(list_filter)
     stations = [{"pos": s["pos"], "id": s["id"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
                  "current": s["pos"] == player["current_pos"]} for s in queue]
@@ -508,8 +533,8 @@ def render_index(results=None, query="", filters=None, theme=None):
     except FileNotFoundError:
         public_url = ""
     return render_template("index.html", **player,
-                                  stations=stations, queue_urls={s["file"] for s in queue},
-                                  list_filter=list_filter, list_order=list_order if list_order in dict(LIST_ORDERS) else "",
+                                  stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
+                                  list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
                                   playlists=playlists, active=active_playlist(),
                                   results=results, query=query, filters=filters or search_filters(), public_url=public_url,
@@ -540,10 +565,11 @@ def estado(notice=None):
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
+        queue = c.playlistinfo()
     player = player_context(status, current, station_info())
     return jsonify(player=render_template("player.html", **player), pos=player["current_pos"],
                    station=player["current_station"], playing=status.get("state") == "play",
-                   queue=status.get("playlist", ""), error=status.get("error", ""), notice=notice)
+                   queue=queue_sig(queue), error=status.get("error", ""), notice=notice)
 
 def back():
     # Volta à página de onde veio o formulário (resultados da pesquisa, lista
@@ -588,16 +614,27 @@ def logo(key):
     if stream_url is None:
         return initials_response(name)
     os.makedirs(LOGO_DIR, exist_ok=True)
+    transient = False
     try:
         logo_url = info.get(stream_url, {}).get("logo") or lookup_logo(stream_url)
         data = fetch(logo_url, LOGO_MAX_BYTES) if logo_url else b""
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
         data = b""
+        # Sem rede ou com o servidor em baixo volta a tentar daqui a uma hora; um
+        # 404 ou uma resposta que não é imagem só amanhã
+        transient = isinstance(e, OSError) and not (isinstance(e, urllib.error.HTTPError) and e.code < 500)
     if len(data) > LOGO_MAX_BYTES or not image_type(data):
         open(failed, "w").close()
+        if transient:
+            retry_at = time.time() - LOGO_RETRY_SECONDS + STATS_RETRY_SECONDS
+            os.utime(failed, (retry_at, retry_at))
         return initials_response(name)
-    with open(path, "wb") as f:
+    # Ficheiro à parte e troca de uma vez: outro pedido ao mesmo tempo nunca serve
+    # (e deixa o browser guardar por um dia) uma imagem a meio
+    tmp = f"{path}.{threading.get_ident()}.tmp"
+    with open(tmp, "wb") as f:
         f.write(data)
+    os.replace(tmp, path)
     return image_response(data)
 
 def image_response(data):

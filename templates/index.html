@@ -56,14 +56,14 @@
     </div>
     {% endif %}
 
-    <div class="card" id="estacoes" data-queue="{{ status.playlist }}">
+    <div class="card" id="estacoes" data-queue="{{ queue_sig }}">
         <div class="card-head">
             <div>
                 <h3>{{ active or 'Estações' }}</h3>
                 <div class="meta">{% if active %}Playlist · as alterações ficam guardadas{% else %}Estas estações não estão guardadas{% endif %}</div>
             </div>
             <a class="btn" href="#playlists">Playlists</a>
-            {% if stations|length > 1 %}
+            {% if stations|length > 1 or list_filter %}
             {# Sem JavaScript filtra com Enter e ordena com o OK; com ele, filtra enquanto se escreve #}
             <form class="list-tools" action="/" method="get" role="search">
                 {{ search_box("filtro", list_filter, "Procurar nesta lista", "/?ordenar=" ~ list_order if list_order else "/") }}
@@ -76,7 +76,7 @@
         {% for s in stations %}
             <div class="tile{% if s.current %} current{% endif %}" data-pos="{{ s.pos }}" data-name="{{ s.name }}"{% if s.hidden %} hidden{% endif %}>
                 <form action="/play_id/{{ s.id }}" method="post">
-                    <input type="hidden" name="next" value="{{ request.full_path }}">
+                    <input type="hidden" name="next" value="{{ list_url }}">
                     <button class="tile-play" title="Tocar {{ s.name }}">
                         <img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy">
                         <span class="tile-name">{{ s.name }}</span>
@@ -84,7 +84,7 @@
                     </button>
                 </form>
                 <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text"> A tocar</span></span>
-                <form action="/remove/{{ s.id }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ request.full_path }}"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
+                <form action="/remove/{{ s.id }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ list_url }}"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
             </div>
         {% endfor %}
         {% if stations %}

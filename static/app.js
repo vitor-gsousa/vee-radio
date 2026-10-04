@@ -42,7 +42,25 @@
         document.querySelectorAll(".modal.open").forEach(function (m) {
             if (m !== target) m.classList.remove("open");
         });
-        if (target && target.classList.contains("modal")) target.classList.add("open");
+        if (target && target.classList.contains("modal")) {
+            target.classList.add("open");
+        } else if (location.pathname === "/search" || location.pathname === "/tema") {
+            // Fechou-se a janela da pesquisa ou do tema: o URL volta a ser o da lista,
+            // para as atualizações da página não voltarem a pedir tudo à API
+            history.replaceState(null, "", listUrl() + location.hash);
+            currentPath = location.pathname + location.search;
+        }
+    }
+
+    // A lista de estações com o filtro e a ordenação que estão no URL
+    function listUrl() {
+        var current = new URLSearchParams(location.search);
+        var params = new URLSearchParams();
+        ["filtro", "ordenar"].forEach(function (key) {
+            if (current.get(key)) params.set(key, current.get(key));
+        });
+        var query = params.toString();
+        return "/" + (query ? "?" + query : "");
     }
 
     function openModal() {
@@ -183,7 +201,7 @@
         // O "next" dos cartões foi escrito com o URL de quando a página foi feita;
         // o filtro escrito entretanto só está no URL atual
         var next = tile && form.querySelector('input[name="next"]');
-        if (next) next.value = location.pathname + location.search;
+        if (next) next.value = listUrl();
         var data = new FormData(form);
         if (submitter && submitter.name) data.append(submitter.name, submitter.value);
         var action = new URL(form.getAttribute("action") || location.href, location.href);

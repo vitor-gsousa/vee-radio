@@ -178,6 +178,8 @@
 
     async function submit(form, submitter) {
         var tile = form.closest(".tile");
+        // Um segundo toque no mesmo cartão enquanto o primeiro não acabou é ignorado
+        if (tile && tile.classList.contains("pending")) return;
         // O "next" dos cartões foi escrito com o URL de quando a página foi feita;
         // o filtro escrito entretanto só está no URL atual
         var next = tile && form.querySelector('input[name="next"]');

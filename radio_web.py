@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
 from flask import Flask, Request, Response, jsonify, render_template, request, redirect
-from mpd import MPDClient, MPDError
+from mpd import CommandError, MPDClient, MPDError
 
 class BigFormRequest(Request):
     # Com "Todas", o "Juntar todas" de um tema manda centenas de rádios, com 3
@@ -166,17 +166,34 @@ def extinf(name, logo):
     return f"#EXTINF:-1{attrs},{name or ''}\n"
 
 def write_m3u(path, entries):
-    with open(path, "w", encoding="utf-8", newline="\n") as f:
+    # Escreve num ficheiro à parte e troca-o de uma vez: quem ler a playlist ao
+    # mesmo tempo (outro pedido, o MPD) nunca a apanha vazia ou a meio
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("#EXTM3U\n")
         for url, name, logo in entries:
             if name or logo:
                 f.write(extinf(name, logo))
             f.write(url + "\n")
+    os.replace(tmp, path)
+
+# O protocolo do MPD separa os comandos por linhas e o python-mpd2 não escapa as
+# quebras de linha: um URL ou nome com uma delas faria correr outro comando (kill)
+CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+def safe_url(url):
+    return bool(url) and not CONTROL_RE.search(url)
 
 def playlist_path(name):
-    if not name or "/" in name or "\\" in name or name.startswith("."):
+    if not name or "/" in name or "\\" in name or name.startswith(".") or CONTROL_RE.search(name):
         return None
     return os.path.join(PLAYLIST_DIR, name + ".m3u")
+
+BAD_NAME = ("Nome inválido", "O nome da playlist não pode ter / nem \\ nem quebras de linha, nem começar por ponto.", 400)
+
+# Juntar, remover e trocar de playlist leem a fila e reescrevem os .m3u: dois
+# pedidos ao mesmo tempo (vários comandos abertos) não se podem misturar
+QUEUE_LOCK = threading.Lock()
 
 def xml_tag(text, *tags):
     # Expressão regular em vez de parser XML: o título ICY pode chegar cortado
@@ -472,7 +489,7 @@ def render_index(results=None, query="", filters=None, theme=None):
     list_filter = request.args.get("filtro", "").strip()
     list_order = request.args.get("ordenar", "")
     wanted = plain_text(list_filter)
-    stations = [{"pos": s["pos"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
+    stations = [{"pos": s["pos"], "id": s["id"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
                  "current": s["pos"] == player["current_pos"]} for s in queue]
     for s in stations:
         s["hidden"] = wanted not in plain_text(s["name"])
@@ -530,9 +547,11 @@ def estado(notice=None):
 
 def back():
     # Volta à página de onde veio o formulário (resultados da pesquisa, lista
-    # filtrada); só aceita caminhos locais
+    # filtrada); só aceita caminhos locais. Os browsers tratam "\" como "/", por
+    # isso "/\site.com" seria um link para outro site
     next_url = request.form.get("next", "")
-    if next_url.startswith("/") and not next_url.startswith("//"):
+    if next_url.startswith("/") and not next_url.startswith("//") and "\\" not in next_url \
+            and not CONTROL_RE.search(next_url):
         return redirect(next_url)
     return redirect("/")
 
@@ -680,15 +699,15 @@ def add_theme():
     target = request.form.get("target", "").strip() or label
     path = playlist_path(target)
     if path is None:
-        return error_page("Nome inválido", "O nome da playlist não pode ter / nem \\ nem começar por ponto.", 400)
+        return error_page(*BAD_NAME)
     logos = [l if LOGO_URL_RE.match(l) else None for l in request.form.getlist("logo")]
     picked = list(zip(request.form.getlist("url"), request.form.getlist("name"), logos))
     remember_uuids(zip(request.form.getlist("url"), request.form.getlist("uuid")))
-    existed = os.path.isfile(path)
-    entries = read_m3u(path)
-    known = {u for u, _, _ in entries}
-    new = [(u, " ".join(n.split()) or None, l) for u, n, l in picked if u and u not in known]
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
+        existed = os.path.isfile(path)
+        entries = read_m3u(path)
+        known = {u for u, _, _ in entries}
+        new = [(u, " ".join(n.split()) or None, l) for u, n, l in picked if safe_url(u) and u not in known]
         if target == active_playlist():
             # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
             # antes para a sincronização encontrar os nomes e logótipos das novas.
@@ -701,18 +720,23 @@ def add_theme():
         write_m3u(path, entries + new)
         if existed:
             return redirect("/#playlists")
-        # Playlist nova: passa a ser a da página principal, como em "Nova playlist"
+        # Playlist nova: passa a ser a da página principal, como em "Nova playlist".
+        # Deixa de haver playlist ativa antes de esvaziar a fila: se o load falhar,
+        # a próxima rádio juntada não pode reescrever a playlist antiga com a fila vazia
+        set_active("")
         c.clear()
         c.load(target)
         if new:
             c.play(0)
-    set_active(target)
+        set_active(target)
     return redirect("/")
 
-@app.route("/play_pos/<int:pos>", methods=["POST"])
-def play_pos(pos):
+# Os cartões usam o id da entrada na fila e não a posição: se a lista mudou
+# noutro aparelho depois de a página ser feita, a posição já é de outra estação
+@app.route("/play_id/<int:song_id>", methods=["POST"])
+def play_id(song_id):
     with mpd_client() as c:
-        c.play(pos)
+        c.playid(song_id)
     return done()
 
 def step(c, delta):
@@ -791,27 +815,34 @@ def add_stream():
     logo = request.form.get("logo", "").strip()
     if not LOGO_URL_RE.match(logo):
         logo = ""
+    if url and not safe_url(url):
+        return error_page("Endereço inválido", "O endereço do stream não pode ter quebras de linha.", 400)
     if url:
         remember_uuids([(url, request.form.get("uuid", ""))])
-        # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele
-        if name or logo:
-            with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
-                f.write(extinf(name, logo) + url + "\n")
-        if logo:
-            # Pode ter falhado antes, sem logótipo; agora há um para tentar
-            try:
-                os.remove(os.path.join(LOGO_DIR, logo_key(url) + ".falhou"))
-            except FileNotFoundError:
-                pass
-        with mpd_client() as c:
-            c.add(url)
-            sync_active(c)
+        with QUEUE_LOCK:
+            # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele
+            if name or logo:
+                with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(extinf(name, logo) + url + "\n")
+            if logo:
+                # Pode ter falhado antes, sem logótipo; agora há um para tentar
+                try:
+                    os.remove(os.path.join(LOGO_DIR, logo_key(url) + ".falhou"))
+                except FileNotFoundError:
+                    pass
+            with mpd_client() as c:
+                c.add(url)
+                sync_active(c)
     return back()
 
-@app.route("/remove/<int:pos>", methods=["POST"])
-def remove(pos):
-    with mpd_client() as c:
-        c.delete(pos)
+@app.route("/remove/<int:song_id>", methods=["POST"])
+def remove(song_id):
+    with QUEUE_LOCK, mpd_client() as c:
+        try:
+            c.deleteid(song_id)
+        except CommandError:
+            # Já tinha sido removida (noutro aparelho, ou com dois toques no ✕)
+            pass
         sync_active(c)
     return back()
 
@@ -821,13 +852,16 @@ def load_playlist():
     path = playlist_path(name)
     if path is None or not os.path.isfile(path):
         return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
+        # Sem playlist ativa enquanto a fila está vazia: se o load falhar, a próxima
+        # rádio juntada não reescreve a playlist anterior só com ela
+        set_active("")
         c.clear()
         c.load(name)
         # Uma playlist vazia não tem posição 0 para tocar
         if c.status().get("playlistlength", "0") != "0":
             c.play(0)
-    set_active(name)
+        set_active(name)
     return redirect("/")
 
 @app.route("/create_playlist", methods=["POST"])
@@ -835,17 +869,19 @@ def create_playlist():
     name = request.form.get("playlist_name", "").strip()
     path = playlist_path(name)
     if path is None:
-        return error_page("Nome inválido", "O nome da playlist não pode ter / nem \\ nem começar por ponto.", 400)
-    if os.path.exists(path):
-        return error_page("Playlist existente", f"Já existe uma playlist «{name}». Escolhe outro nome.", 400)
-    os.makedirs(PLAYLIST_DIR, exist_ok=True)
-    with mpd_client() as c:
-        if request.form.get("from") == "atuais":
-            write_m3u(path, queue_entries(c))
-        else:
-            write_m3u(path, [])
-            c.clear()
-    set_active(name)
+        return error_page(*BAD_NAME)
+    with QUEUE_LOCK:
+        if os.path.exists(path):
+            return error_page("Playlist existente", f"Já existe uma playlist «{name}». Escolhe outro nome.", 400)
+        os.makedirs(PLAYLIST_DIR, exist_ok=True)
+        with mpd_client() as c:
+            if request.form.get("from") == "atuais":
+                write_m3u(path, queue_entries(c))
+            else:
+                write_m3u(path, [])
+                set_active("")
+                c.clear()
+        set_active(name)
     return redirect("/")
 
 @app.route("/delete_playlist", methods=["POST"])
@@ -853,14 +889,15 @@ def delete_playlist():
     name = request.form.get("playlist_name", "").strip()
     path = playlist_path(name)
     if path is None:
-        return error_page("Nome inválido", "O nome da playlist não pode ter / nem \\ nem começar por ponto.", 400)
-    was_active = name == active_playlist()
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
-    if was_active:
-        set_active("")
+        return error_page(*BAD_NAME)
+    with QUEUE_LOCK:
+        was_active = name == active_playlist()
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        if was_active:
+            set_active("")
     return redirect("/#playlists")
 
 if __name__ == "__main__":

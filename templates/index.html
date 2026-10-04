@@ -75,7 +75,7 @@
         <div class="stations">
         {% for s in stations %}
             <div class="tile{% if s.current %} current{% endif %}" data-pos="{{ s.pos }}" data-name="{{ s.name }}"{% if s.hidden %} hidden{% endif %}>
-                <form action="/play_pos/{{ s.pos }}" method="post">
+                <form action="/play_id/{{ s.id }}" method="post">
                     <input type="hidden" name="next" value="{{ request.full_path }}">
                     <button class="tile-play" title="Tocar {{ s.name }}">
                         <img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy">
@@ -84,7 +84,7 @@
                     </button>
                 </form>
                 <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text"> A tocar</span></span>
-                <form action="/remove/{{ s.pos }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ request.full_path }}"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
+                <form action="/remove/{{ s.id }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ request.full_path }}"><button title="Remover" aria-label="Remover {{ s.name }}">✕</button></form>
             </div>
         {% endfor %}
         {% if stations %}

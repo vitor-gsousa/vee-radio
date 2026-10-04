@@ -35,16 +35,34 @@ send_ntfy() {
         "$topic"
 }
 
+# Pede ao processo que termine e espera até 10 s que saia: o pkill não espera, e
+# um MPD antigo ainda a gravar o estado ocupa a porta 6600 e o pid_file, e o novo
+# não arranca. Se não sair a bem, é terminado à força
+stop_and_wait() {
+    pkill "$@" 2>/dev/null || return 0
+    for _ in $(seq 1 50); do
+        pgrep "$@" >/dev/null || return 0
+        sleep 0.2
+    done
+    pkill -9 "$@" 2>/dev/null || true
+    sleep 0.5
+}
+
 termux-wake-lock 2>/dev/null || true
-pkill -f cloudflared 2>/dev/null || true
-pkill -f "http.server $LINK_PORT" 2>/dev/null || true
-pkill -f radio_web.py 2>/dev/null || true
-pkill mpd 2>/dev/null || true
+stop_and_wait -f cloudflared
+stop_and_wait -f "http.server $LINK_PORT"
+stop_and_wait -f radio_web.py
+stop_and_wait -x mpd
 rm -f ~/tunnel-url.txt
 
 echo "A iniciar MPD..."
 mpd
-sleep 1
+# Num telemóvel lento o MPD pode demorar a aceitar ligações; sem isto, a fila
+# parecia vazia e a playlist ativa não era carregada
+for _ in $(seq 1 50); do
+    mpc status >/dev/null 2>&1 && break
+    sleep 0.2
+done
 # O MPD restaura a fila sozinho; se vier vazia, volta a carregar a playlist ativa
 # do comando web (evita duplicados)
 ACTIVE="$(cat ~/.config/mpd/playlist-ativa.txt 2>/dev/null)"

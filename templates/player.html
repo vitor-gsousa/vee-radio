@@ -2,8 +2,7 @@
    controlos ao centro e volume à direita (no telemóvel, o volume desce para uma segunda linha).
    A bandeira, os géneros, o site e os votos vêm do radio-browser (station_details);
    enquanto não chegam, a barra mostra só o que vem do MPD #}
-<footer class="player" data-sig="{{ [current_station, current_title, current_key, status.state, volume, has_stations,
-        kbps, details.countrycode, details.tags|join(','), details.homepage, details.uuid, details.votes, voted]|join('|') }}">
+<footer class="player" data-sig="{{ sig }}">
     <div class="player-now">
         {% if current_key %}
         <img class="player-logo" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">

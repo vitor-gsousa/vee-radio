@@ -23,7 +23,7 @@ main() {
     # apt-get e não pkg: o "pkg update" também atualiza os pacotes, mas sem as opções acima
     apt-get update </dev/null
     apt-get "${APT_OPTS[@]}" full-upgrade </dev/null
-    apt-get "${APT_OPTS[@]}" install mpd mpc python git nano ffmpeg curl libcurl ca-certificates cloudflared </dev/null
+    apt-get "${APT_OPTS[@]}" install mpd mpc python python-pillow git nano ffmpeg curl libcurl ca-certificates cloudflared </dev/null
 
     echo "=== 2. A instalar bibliotecas Python ==="
     pip install flask python-mpd2

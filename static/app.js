@@ -249,7 +249,7 @@
     // Atualiza a barra do reprodutor e a estação marcada a partir do /estado
     function updatePlayer(state) {
         var player = document.querySelector(".player");
-        if (player) {
+        if (player && state.player) {
             var fresh = new DOMParser().parseFromString(state.player, "text/html").querySelector(".player");
             if (fresh && fresh.dataset.sig !== player.dataset.sig) {
                 // O logótipo é o mesmo se a estação não mudou: não volta a brilhar
@@ -259,9 +259,13 @@
                 player.replaceWith(fresh);
             }
         }
-        document.querySelectorAll(".tile").forEach(function (t) {
-            t.classList.toggle("current", t.dataset.pos === String(state.pos));
-        });
+        // Só o cartão que deixou de tocar e o que passou a tocar, e não todos a cada 5 s
+        var was = document.querySelector(".tile.current");
+        var now = state.pos == null ? null : document.querySelector('.tile[data-pos="' + CSS.escape(String(state.pos)) + '"]');
+        if (was !== now) {
+            if (was) was.classList.remove("current");
+            if (now) now.classList.add("current");
+        }
         updateTitle(state.station, state.playing);
         if (state.notice) toast(state.notice.text, state.notice.ok);
         // A lista de estações mudou noutro aparelho, ou apareceu ou desapareceu o
@@ -277,7 +281,9 @@
         if (document.hidden || busy || !document.querySelector(".player")) return;
         var seq = ++stateSeq;
         try {
-            var response = await fetch("/estado", { headers: HEADERS });
+            // Com o sig da barra atual: se nada mudou, o servidor não a manda outra vez
+            var sig = document.querySelector(".player").dataset.sig || "";
+            var response = await fetch("/estado?sig=" + encodeURIComponent(sig), { headers: HEADERS });
             // Entretanto carregou-se num botão: este estado é de antes e já não vale
             if (seq !== stateSeq) return;
             if (response.ok) updatePlayer(await response.json());
@@ -298,7 +304,7 @@
         var wanted = plain(input.value.trim());
         var shown = 0;
         document.querySelectorAll(".tile").forEach(function (t) {
-            var match = plain(t.dataset.name || "").indexOf(wanted) !== -1;
+            var match = (t.dataset.plain || "").indexOf(wanted) !== -1;
             t.hidden = !match;
             if (match) shown++;
         });

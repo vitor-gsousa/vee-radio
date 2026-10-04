@@ -1,7 +1,9 @@
+import gzip
 import hashlib
 import hmac
 import html
 import http.client
+import io
 import ipaddress
 import json
 import os
@@ -18,8 +20,13 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
-from flask import Flask, Request, Response, jsonify, render_template, request, redirect
+from flask import Flask, Request, Response, jsonify, render_template, request, redirect, url_for
 from mpd import CommandError, MPDClient, MPDError
+try:
+    # Opcional (python-pillow no Termux): reduz os logótipos grandes; sem ele ficam como vêm
+    from PIL import Image
+except ImportError:
+    Image = None
 
 class BigFormRequest(Request):
     # Com "Todas", o "Juntar todas" de um tema manda centenas de rádios, com 3
@@ -250,21 +257,47 @@ def clean_title(title):
     # Sem artista, o DB_DALET_TITLE_NAME costuma ser o slogan da rádio
     return f"{artist} - {song}" if artist and song else ""
 
-def station_info():
-    # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
-    # nomes; cada ficheiro sobrepõe-se aos anteriores
+def file_sig(path):
+    # Muda sempre que o ficheiro é reescrito: o write_m3u troca-o por outro (inode novo)
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return (path, None)
+    return (path, st.st_ino, st.st_mtime_ns, st.st_size)
+
+# As playlists só são lidas outra vez quando algum ficheiro muda: o /estado (a cada
+# 5 segundos, por cada pessoa com a página aberta), a página e cada logótipo
+# precisam dos nomes, e ler tudo de cada vez era o que mais pesava
+_index_cache = {"key": None, "info": {}, "counts": {}}
+_index_lock = threading.Lock()
+
+def station_index():
     paths = []
     if os.path.isdir(PLAYLIST_DIR):
         paths += [os.path.join(PLAYLIST_DIR, f) for f in sorted(os.listdir(PLAYLIST_DIR)) if f.endswith(".m3u")]
-    info = {}
+    key = tuple(file_sig(p) for p in paths + [NAMES_FILE])
+    with _index_lock:
+        if _index_cache["key"] == key:
+            return _index_cache["info"], _index_cache["counts"]
+    info, counts = {}, {}
     for path in paths + [NAMES_FILE]:
-        for url, name, logo in read_m3u(path):
+        entries = read_m3u(path)
+        if path != NAMES_FILE:
+            counts[os.path.basename(path)[:-len(".m3u")]] = len(entries)
+        for url, name, logo in entries:
             entry = info.setdefault(url, {"name": None, "logo": None})
             if name:
                 entry["name"] = name
             if logo:
                 entry["logo"] = logo
-    return info
+    with _index_lock:
+        _index_cache.update(key=key, info=info, counts=counts)
+    return info, counts
+
+def station_info():
+    # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
+    # nomes; cada ficheiro sobrepõe-se aos anteriores. É partilhado: só para ler
+    return station_index()[0]
 
 def logo_key(url):
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:16]
@@ -373,12 +406,32 @@ def lookup_logo(stream_url):
 # ficheiro; cada escrita relê-o e junta só as suas entradas
 STATS_LOCK = threading.Lock()
 
-def load_stats():
+# O /estado lê os detalhes da estação a tocar a cada 5 segundos: o ficheiro só é
+# interpretado outra vez quando muda
+_stats_cache = {"key": None, "stats": {}}
+
+def read_stats_file():
     try:
         with open(STATS_FILE, encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, ValueError):
         return {}
+
+def load_stats():
+    # Partilhado entre pedidos: só para ler. Quem escreve usa o merge_stats
+    key = file_sig(STATS_FILE)
+    if _stats_cache["key"] != key:
+        _stats_cache.update(key=key, stats=read_stats_file())
+    return _stats_cache["stats"]
+
+# Entradas de rádios que já não estão em nenhuma playlist saem ao fim de um mês;
+# sem isto o ficheiro crescia com cada rádio que alguma vez passou por um tema
+STATS_KEEP_SECONDS = 30 * 24 * 3600
+
+def prune_stats(stats, now):
+    known = station_info()
+    return {url: e for url, e in stats.items()
+            if url in known or now - max(e.get("t") or 0, e.get("voted_at") or 0) < STATS_KEEP_SECONDS}
 
 def save_stats(stats):
     os.makedirs(os.path.dirname(STATS_FILE), exist_ok=True)
@@ -390,10 +443,11 @@ def save_stats(stats):
 def merge_stats(updates):
     # Grava entradas novas mantendo o momento do último voto
     with STATS_LOCK:
-        stats = load_stats()
+        stats = read_stats_file()
         for url, entry in updates.items():
             voted = stats.get(url, {}).get("voted_at")
             stats[url] = {**entry, "voted_at": voted} if voted and "voted_at" not in entry else entry
+        stats = prune_stats(stats, time.time())
         save_stats(stats)
         return stats
 
@@ -593,6 +647,16 @@ def player_context(status, current, info):
             "current_pos": current.get("pos") if playing else None,
             "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
 
+def with_sig(player):
+    # Assinatura do que a barra mostra: o script manda-a no /estado e, se não mudou,
+    # a barra não é feita outra vez nem enviada
+    d = player["details"]
+    parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
+             player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
+             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"]]
+    player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
+    return player
+
 def queue_sig(queue):
     # Muda só quando se juntam, removem ou trocam estações. A versão da fila do
     # MPD (status.playlist) também muda quando o stream a tocar muda de música,
@@ -608,7 +672,7 @@ def render_index(results=None, query="", filters=None, theme=None):
 
     info = station_info()
     display_name = display_namer(info)
-    player = player_context(status, current, info)
+    player = with_sig(player_context(status, current, info))
     # Filtro e ordenação da lista: as estações escondidas vão na página com hidden,
     # para o script as poder mostrar enquanto se escreve, sem pedir outra vez
     list_filter = request.args.get("filtro", "").strip()
@@ -623,7 +687,10 @@ def render_index(results=None, query="", filters=None, theme=None):
     stations = [{"pos": s["pos"], "id": s["id"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
                  "current": s["pos"] == player["current_pos"]} for s in queue]
     for s in stations:
-        s["hidden"] = wanted not in plain_text(s["name"])
+        # O nome já normalizado vai na página (data-plain), para o filtro do script
+        # não ter de o normalizar de novo a cada tecla
+        s["plain"] = plain_text(s["name"])
+        s["hidden"] = wanted not in s["plain"]
     if list_order in POPULAR_ORDERS:
         stats = station_stats([s["file"] for s in stations])
         for s in stations:
@@ -632,7 +699,8 @@ def render_index(results=None, query="", filters=None, theme=None):
         stations.sort(key=lambda s: -s["stat"])
     elif list_order in ("name", "-name"):
         stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
-    playlists = [{"name": p, "count": len(read_m3u(playlist_path(p) or ""))} for p in stored_playlists]
+    counts = station_index()[1]
+    playlists = [{"name": p, "count": counts.get(p, 0)} for p in stored_playlists]
     return render_template("index.html", **player,
                                   stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
@@ -722,6 +790,38 @@ def check_origin():
 def from_script():
     return request.headers.get("X-Requested-With") == "fetch"
 
+# Os ficheiros estáticos levam o hash no URL (asset_url): podem ficar um ano em cache
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 365 * 24 * 3600
+_asset_hashes = {}
+
+@app.template_global()
+def asset_url(filename):
+    path = os.path.join(app.static_folder, filename)
+    sig = file_sig(path)
+    if _asset_hashes.get(filename, (None,))[0] != sig:
+        with open(path, "rb") as f:
+            _asset_hashes[filename] = (sig, hashlib.sha1(f.read()).hexdigest()[:10])
+    return url_for("static", filename=filename, v=_asset_hashes[filename][1])
+
+COMPRESSIBLE = ("text/html", "application/json", "image/svg+xml", "text/css", "text/javascript", "application/javascript")
+
+@app.after_request
+def compress(response):
+    # A página com 500 estações tem ~470 KB e comprimida ~30 KB. Pesa na rede local
+    # e entre o telemóvel e a Cloudflare, que só comprime daí para a frente
+    if (response.status_code != 200 or response.direct_passthrough or "Content-Encoding" in response.headers
+            or response.mimetype not in COMPRESSIBLE or "gzip" not in request.headers.get("Accept-Encoding", "")):
+        if response.mimetype in COMPRESSIBLE:
+            response.vary.add("Accept-Encoding")
+        return response
+    data = response.get_data()
+    if len(data) < 1024:
+        return response
+    response.set_data(gzip.compress(data, compresslevel=5))
+    response.headers["Content-Encoding"] = "gzip"
+    response.vary.add("Accept-Encoding")
+    return response
+
 @app.after_request
 def redirect_for_script(response):
     # O fetch segue os redirects sozinho e perde o #janela do destino; para o
@@ -741,8 +841,10 @@ def estado(notice=None):
         status = c.status()
         current = c.currentsong()
         queue = c.playlistinfo()
-    player = player_context(status, current, station_info())
-    return jsonify(player=render_template("player.html", **player), pos=player["current_pos"],
+    player = with_sig(player_context(status, current, station_info()))
+    # O polling manda o sig da barra que tem: se for igual, não se volta a fazer
+    html_player = None if request.args.get("sig") == player["sig"] else render_template("player.html", **player)
+    return jsonify(player=html_player, sig=player["sig"], pos=player["current_pos"],
                    station=player["current_station"], playing=status.get("state") == "play",
                    queue=queue_sig(queue), error=status.get("error", ""), notice=notice)
 
@@ -775,7 +877,14 @@ def logo(key):
     path = os.path.join(LOGO_DIR, key)
     try:
         with open(path, "rb") as f:
-            return image_response(f.read())
+            data = f.read()
+        # Logótipos guardados antes de haver redução: reduz-se uma vez, ao servir
+        if len(data) > LOGO_SHRINK_ABOVE:
+            smaller = shrink_logo(data)
+            if smaller is not data:
+                write_logo(path, smaller)
+                data = smaller
+        return image_response(data)
     except FileNotFoundError:
         pass
     failed = path + ".falhou"
@@ -804,13 +913,39 @@ def logo(key):
             retry_at = time.time() - LOGO_RETRY_SECONDS + STATS_RETRY_SECONDS
             os.utime(failed, (retry_at, retry_at))
         return initials_response(name)
+    data = shrink_logo(data)
+    write_logo(path, data)
+    return image_response(data)
+
+def write_logo(path, data):
     # Ficheiro à parte e troca de uma vez: outro pedido ao mesmo tempo nunca serve
     # (e deixa o browser guardar por um dia) uma imagem a meio
     tmp = f"{path}.{threading.get_ident()}.tmp"
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
-    return image_response(data)
+
+# Os cartões têm até ~150 px; 256 chega para ecrãs de alta densidade. Muitos
+# favicons vêm com 512 ou 1024 px e centenas de KB
+LOGO_SIZE = 256
+LOGO_SHRINK_ABOVE = 24 * 1024
+
+def shrink_logo(data):
+    # Devolve o mesmo objeto quando não reduz (sem Pillow, SVG, já pequeno ou erro)
+    if Image is None or len(data) <= LOGO_SHRINK_ABOVE or image_type(data) in (None, "image/svg+xml"):
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            if max(im.size) <= LOGO_SIZE and image_type(data) != "image/x-icon":
+                return data
+            im.thumbnail((LOGO_SIZE, LOGO_SIZE))
+            out = io.BytesIO()
+            im.convert("RGBA").save(out, "PNG", optimize=True)
+    except Exception:
+        # Imagem estranha ou demasiado grande para o Pillow: fica a original
+        return data
+    smaller = out.getvalue()
+    return smaller if len(smaller) < len(data) else data
 
 def image_response(data):
     r = Response(data, mimetype=image_type(data) or "application/octet-stream")
@@ -825,7 +960,29 @@ def initials_response(name):
     r.headers["Cache-Control"] = "public, max-age=3600"
     return r
 
+# Juntar uma rádio a partir da pesquisa ou de um tema volta à mesma página para
+# mostrar o ✓, o que repetia o pedido ao radio-browser (até 1000 rádios) por cada
+# rádio juntada. Os resultados ficam uns minutos em memória
+SEARCH_CACHE_SECONDS = 300
+SEARCH_CACHE_SIZE = 8
+_search_cache = {}
+_search_lock = threading.Lock()
+
 def find_stations(filters, limit, **criteria):
+    key = (tuple(sorted(filters.items())), limit, tuple(sorted(criteria.items())))
+    now = time.time()
+    with _search_lock:
+        hit = _search_cache.get(key)
+        if hit and now - hit[0] < SEARCH_CACHE_SECONDS:
+            return list(hit[1])
+    results = search_stations(filters, limit, **criteria)
+    with _search_lock:
+        _search_cache[key] = (now, results)
+        for old in sorted(_search_cache, key=lambda k: _search_cache[k][0])[:-SEARCH_CACHE_SIZE]:
+            del _search_cache[old]
+    return list(results)
+
+def search_stations(filters, limit, **criteria):
     # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
     # Pede mais do que o limite porque os repetidos e os HLS ficam de fora.
     if filters["ordem"] == "name":
@@ -933,8 +1090,12 @@ def add_theme():
         if target == active_playlist():
             # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
             # antes para a sincronização encontrar os nomes e logótipos das novas.
-            for url, _, _ in new:
-                c.add(url)
+            # Todas num só pedido ao MPD, em vez de uma ida e volta por rádio
+            if new:
+                c.command_list_ok_begin()
+                for url, _, _ in new:
+                    c.add(url)
+                c.command_list_end()
             write_m3u(path, entries + new)
             sync_active(c)
             return redirect("/")

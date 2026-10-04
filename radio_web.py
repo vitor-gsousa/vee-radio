@@ -1,8 +1,10 @@
 import hashlib
 import html
+import ipaddress
 import json
 import os
 import re
+import socket
 import threading
 import time
 import unicodedata
@@ -182,8 +184,12 @@ def write_m3u(path, entries):
 # quebras de linha: um URL ou nome com uma delas faria correr outro comando (kill)
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
+# Só streams da internet: sem isto, um caminho relativo tocava ficheiros da pasta
+# Music e outros protocolos do MPD (smb://, nfs://) chegavam à rede local
+STREAM_URL_RE = re.compile(r"^https?://\S+$", re.I)
+
 def safe_url(url):
-    return bool(url) and not CONTROL_RE.search(url)
+    return bool(url) and bool(STREAM_URL_RE.match(url)) and not CONTROL_RE.search(url)
 
 def playlist_path(name):
     if not name or "/" in name or "\\" in name or name.startswith(".") or CONTROL_RE.search(name):
@@ -244,13 +250,45 @@ def image_type(data):
         return "image/webp"
     if data.startswith(b"\x00\x00\x01\x00"):
         return "image/x-icon"
-    if b"<svg" in data[:1024]:
+    # Só um SVG que comece como SVG: uma página HTML com um ícone <svg> lá dentro
+    # (a de um router, por exemplo) não pode passar por imagem e ser devolvida
+    head = data[:1024].lstrip(b"\xef\xbb\xbf \t\r\n").lower()
+    if (head.startswith(b"<svg") or head.startswith(b"<?xml")) and b"<svg" in head and b"<html" not in head:
         return "image/svg+xml"
     return None
 
 def fetch(url, limit):
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
     with urllib.request.urlopen(req, timeout=8) as r:
+        return r.read(limit + 1)
+
+def public_host(url):
+    # Os logótipos vêm de endereços escritos por quem usa o link público: o
+    # telemóvel não pode ir buscá-los à rede local (router, MPD, a própria app)
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return False
+    try:
+        addresses = socket.getaddrinfo(parts.hostname, parts.port or (443 if parts.scheme == "https" else 80),
+                                       type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return all(ipaddress.ip_address(a[4][0].split("%")[0]).is_global for a in addresses)
+
+class PublicRedirects(urllib.request.HTTPRedirectHandler):
+    # Um logótipo público que redireciona para a rede local também é recusado
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not public_host(newurl):
+            raise urllib.error.URLError(f"redirecionamento para um endereço não público: {newurl}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+_public_opener = urllib.request.build_opener(PublicRedirects)
+
+def fetch_public(url, limit):
+    if not public_host(url):
+        raise ValueError(f"endereço não público: {url}")
+    req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
+    with _public_opener.open(req, timeout=8) as r:
         return r.read(limit + 1)
 
 def api_get(path, **params):
@@ -632,7 +670,7 @@ def logo(key):
     transient = False
     try:
         logo_url = info.get(stream_url, {}).get("logo") or lookup_logo(stream_url)
-        data = fetch(logo_url, LOGO_MAX_BYTES) if logo_url else b""
+        data = fetch_public(logo_url, LOGO_MAX_BYTES) if logo_url else b""
     except (OSError, ValueError) as e:
         data = b""
         # Sem rede ou com o servidor em baixo volta a tentar daqui a uma hora; um
@@ -878,7 +916,7 @@ def add_stream():
     if not LOGO_URL_RE.match(logo):
         logo = ""
     if url and not safe_url(url):
-        return error_page("Endereço inválido", "O endereço do stream não pode ter quebras de linha.", 400)
+        return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https:// e não pode ter quebras de linha.", 400)
     if url:
         remember_uuids([(url, request.form.get("uuid", ""))])
         with QUEUE_LOCK:

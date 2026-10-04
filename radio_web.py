@@ -1207,7 +1207,11 @@ def enter():
     if not (is_local() and same_key(request.args.get("chave", ""), config_key())):
         return error_page("Chave inválida", "Abre as configurações a partir do Termux, com ~/config.sh.", 403)
     response = redirect("/#config" if request.args.get("ir") == "config" else "/")
-    response.set_cookie(CONFIG_COOKIE, config_key(), max_age=365 * 24 * 3600, httponly=True, samesite="Strict")
+    # Lax e não Strict: o link chega de outra app (termux-open-url), e o browser trata
+    # essa navegação como vinda de outro site; com Strict o cookie não ia no
+    # redirecionamento a seguir e a página abria sem as Configurações. Os POST de
+    # outros sites já são recusados pelo check_origin
+    response.set_cookie(CONFIG_COOKIE, config_key(), max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
     return response
 
 def restart_all():

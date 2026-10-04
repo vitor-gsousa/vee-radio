@@ -45,13 +45,13 @@ LOGO_MAX_BYTES = 512 * 1024
 # Depois de uma falha, só volta a tentar descarregar o logótipo passado um dia
 LOGO_RETRY_SECONDS = 24 * 3600
 # Cliques e votos das estações no radio-browser, para ordenar a lista pelas mais
-# ouvidas ou votadas: URL do stream -> {"uuid", "clickcount", "votes", "t"}
+# ouvidas, votadas ou em tendência: URL do stream -> {"uuid", "clickcount", "votes", "clicktrend", "t"}
 STATS_FILE = os.path.expanduser("~/.cache/vee-radio/stats.json")
 STATS_MAX_AGE = 24 * 3600
 # Depois de uma falha de rede, volta a tentar passada uma hora
 STATS_RETRY_SECONDS = 3600
 # Muda quando se juntam campos às entradas, para as antigas serem atualizadas
-STATS_VERSION = 2
+STATS_VERSION = 3
 # O radio-browser só aceita um voto por IP na mesma rádio a cada 10 minutos
 VOTE_COOLDOWN = 600
 HOMEPAGE_RE = re.compile(r"^https?://[^\s\"'<>]+$")
@@ -93,15 +93,15 @@ COUNTRIES = [
 COUNTRY_LABELS = dict(COUNTRIES)
 # Ordenações da API (campo order, do maior para o menor); "random" serve para descobrir rádios novas
 # "name" mostra todas, por ordem alfabética, até ALL_LIMIT
-ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "em alta"), ("random", "aleatórias"),
+ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "tendências"), ("random", "aleatórias"),
           ("name", "todas, de A a Z")]
 ORDER_LABELS = dict(ORDERS)
 ALL_LIMIT = 500
 # Ordenações da lista de estações na página. Só mudam o que se vê: a playlist,
 # e o anterior/seguinte, continuam pela ordem guardada
 LIST_ORDERS = [("", "ordem da playlist"), ("clickcount", ORDER_LABELS["clickcount"]), ("votes", ORDER_LABELS["votes"]),
-               ("name", "de A a Z"), ("-name", "de Z a A")]
-POPULAR_ORDERS = ("clickcount", "votes")
+               ("clicktrend", ORDER_LABELS["clicktrend"]), ("name", "de A a Z"), ("-name", "de Z a A")]
+POPULAR_ORDERS = ("clickcount", "votes", "clicktrend")
 # Línguas pelo nome em inglês, como estão na API. O filtro language apanha partes
 # do nome, por isso "portuguese" inclui "brazilian portuguese"
 LANGUAGES = [
@@ -283,6 +283,7 @@ def stat_entry(station):
     homepage = station.get("homepage") or ""
     return {"v": STATS_VERSION, "uuid": station.get("stationuuid"), "t": time.time(),
             "clickcount": int(station.get("clickcount") or 0), "votes": int(station.get("votes") or 0),
+            "clicktrend": int(station.get("clicktrend") or 0),
             "countrycode": (station.get("countrycode") or "").upper(), "tags": tags[:3],
             "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
             "codec": station.get("codec") or "", "bitrate": int(station.get("bitrate") or 0)}

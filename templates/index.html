@@ -80,7 +80,7 @@
                     <button class="tile-play" title="Tocar {{ s.name }}">
                         <img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy">
                         <span class="tile-name">{{ s.name }}</span>
-                        {% if s.stat is defined %}<span class="tile-stat" title="{% if list_order == 'votes' %}Votos{% else %}Cliques nas últimas 24 horas{% endif %} no radio-browser.info">{% if list_order == 'votes' %}♥{% else %}▶{% endif %} {{ s.stat|compact }}</span>{% endif %}
+                        {% if s.stat is defined %}<span class="tile-stat" title="{% if list_order == 'votes' %}Votos{% elif list_order == 'clicktrend' %}Variação dos cliques face ao dia anterior{% else %}Cliques nas últimas 24 horas{% endif %} no radio-browser.info">{% if list_order == 'votes' %}♥ {{ s.stat|compact }}{% elif list_order == 'clicktrend' %}{% if s.stat < 0 %}↘ −{{ (-s.stat)|compact }}{% else %}↗ +{{ s.stat|compact }}{% endif %}{% else %}▶ {{ s.stat|compact }}{% endif %}</span>{% endif %}
                     </button>
                 </form>
                 <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text"> A tocar</span></span>

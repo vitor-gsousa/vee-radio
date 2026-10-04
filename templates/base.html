@@ -117,6 +117,19 @@
         .player-station, .player-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .player-station { font-weight: bold; font-size: 15px; }
         .player-title { font-size: 13px; color: #a6adc8; margin-top: 2px; }
+        /* Qualidade e géneros por baixo da faixa; no telemóvel fica só a qualidade */
+        .player-detail { font-size: 12px; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .player-detail span + span::before { content: " · "; }
+        .player-tag { display: none; }
+        .player-volume .icon { flex: none; }
+        a.icon { display: block; box-sizing: border-box; }
+        /* Votar: coração vazio, cheio depois de votar (o radio-browser só aceita um voto a cada 10 minutos) */
+        .vote { width: auto; min-width: 40px; display: flex; gap: 4px; align-items: center; justify-content: center; }
+        .icon.vote svg { width: 24px; height: 24px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; }
+        .vote:hover { color: #f38ba8; }
+        .vote.voted, .vote.voted:disabled { color: #f38ba8; opacity: 1; }
+        .icon.vote.voted svg { fill: currentColor; }
+        .vote-count { display: none; font-size: 12px; }
         .player-controls { grid-area: controls; display: flex; gap: 4px; align-items: center; }
         .player-volume { grid-area: volume; display: flex; gap: 8px; align-items: center; }
         .icon { width: 40px; height: 40px; padding: 8px; margin: 0; border-radius: 20px; background: transparent; color: #cdd6f4; }
@@ -157,6 +170,7 @@
         body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; height: 3px; width: 40%; background: #89b4fa; animation: busy 1s ease-in-out infinite; }
         @keyframes busy { from { transform: translateX(-100%); } to { transform: translateX(250vw); } }
         .tile.pending .tile-play { opacity: 0.6; }
+        .toast.ok { background: #a6e3a1; }
         .toast { position: fixed; left: 50%; bottom: 140px; z-index: 30; transform: translateX(-50%); max-width: 90%; padding: 10px 16px; border-radius: 8px; background: #f38ba8; color: #11111b; font-weight: bold; font-size: 14px; }
 
         /* PC: estações em cartões maiores e o reprodutor numa só linha */
@@ -164,7 +178,9 @@
             body { max-width: 1100px; padding: 30px 30px 120px; }
             .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
             .player-logo { width: 60px; height: 60px; }
-            .player-volume { justify-self: end; width: 100%; max-width: 260px; }
+            .player-volume { justify-self: end; width: 100%; max-width: 360px; }
+            .player-tag { display: inline; }
+            .vote-count { display: inline; }
             .topbar { margin-top: -30px; padding: 14px 0; }
             .brand { font-size: 22px; }
             .nav-actions .btn { padding: 10px 16px; font-size: 15px; }

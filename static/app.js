@@ -23,11 +23,12 @@
         document.body.classList.toggle("busy", busy > 0);
     }
 
-    function toast(text) {
+    // Mensagem curta por cima da barra: vermelha para erros, verde com ok
+    function toast(text, ok) {
         var old = document.querySelector(".toast");
         if (old) old.remove();
         var el = document.createElement("div");
-        el.className = "toast";
+        el.className = ok ? "toast ok" : "toast";
         el.textContent = text;
         document.body.appendChild(el);
         setTimeout(function () { el.remove(); }, 4000);
@@ -233,6 +234,7 @@
             t.classList.toggle("current", t.dataset.pos === String(state.pos));
         });
         updateTitle(state.station, state.playing);
+        if (state.notice) toast(state.notice.text, state.notice.ok);
         // A lista de estações mudou noutro aparelho, ou apareceu ou desapareceu o
         // aviso de erro: recarrega a página, mas nunca com uma janela aberta
         var list = document.getElementById("estacoes");

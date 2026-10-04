@@ -3,6 +3,7 @@ import html
 import json
 import os
 import re
+import threading
 import time
 import unicodedata
 import urllib.parse
@@ -49,6 +50,11 @@ STATS_FILE = os.path.expanduser("~/.cache/vee-radio/stats.json")
 STATS_MAX_AGE = 24 * 3600
 # Depois de uma falha de rede, volta a tentar passada uma hora
 STATS_RETRY_SECONDS = 3600
+# Muda quando se juntam campos às entradas, para as antigas serem atualizadas
+STATS_VERSION = 2
+# O radio-browser só aceita um voto por IP na mesma rádio a cada 10 minutos
+VOTE_COOLDOWN = 600
+HOMEPAGE_RE = re.compile(r"^https?://[^\s\"'<>]+$")
 UUID_RE = re.compile(r"^[0-9a-f-]{36}$")
 API = "https://all.api.radio-browser.info"
 # Cores das iniciais quando a rádio não tem logótipo
@@ -239,6 +245,10 @@ def lookup_logo(stream_url):
             return s["favicon"]
     return None
 
+# A barra (em segundo plano), a ordenação da lista e os votos escrevem no mesmo
+# ficheiro; cada escrita relê-o e junta só as suas entradas
+STATS_LOCK = threading.Lock()
+
 def load_stats():
     try:
         with open(STATS_FILE, encoding="utf-8") as f:
@@ -253,9 +263,32 @@ def save_stats(stats):
         json.dump(stats, f)
     os.replace(tmp, STATS_FILE)
 
+def merge_stats(updates):
+    # Grava entradas novas mantendo o momento do último voto
+    with STATS_LOCK:
+        stats = load_stats()
+        for url, entry in updates.items():
+            voted = stats.get(url, {}).get("voted_at")
+            stats[url] = {**entry, "voted_at": voted} if voted and "voted_at" not in entry else entry
+        save_stats(stats)
+        return stats
+
 def stat_entry(station):
-    return {"uuid": station.get("stationuuid"), "clickcount": int(station.get("clickcount") or 0),
-            "votes": int(station.get("votes") or 0), "t": time.time()}
+    # Números e detalhes da rádio para a lista e para a barra do reprodutor
+    tags = []
+    for tag in (station.get("tags") or "").split(","):
+        tag = " ".join(tag.split())[:20]
+        if tag and tag.lower() not in (t.lower() for t in tags):
+            tags.append(tag)
+    homepage = station.get("homepage") or ""
+    return {"v": STATS_VERSION, "uuid": station.get("stationuuid"), "t": time.time(),
+            "clickcount": int(station.get("clickcount") or 0), "votes": int(station.get("votes") or 0),
+            "countrycode": (station.get("countrycode") or "").upper(), "tags": tags[:3],
+            "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
+            "codec": station.get("codec") or "", "bitrate": int(station.get("bitrate") or 0)}
+
+def stats_stale(entry, now):
+    return now - entry.get("t", 0) > STATS_MAX_AGE or entry.get("v") != STATS_VERSION
 
 def remember_uuids(pairs):
     # Rádios juntadas a partir da pesquisa ou de um tema: guardar o uuid deixa
@@ -263,26 +296,25 @@ def remember_uuids(pairs):
     pairs = [(u, i) for u, i in pairs if u and UUID_RE.match(i or "")]
     if not pairs:
         return
-    stats = load_stats()
-    for url, uuid in pairs:
-        if stats.get(url, {}).get("uuid") != uuid:
-            stats[url] = {"uuid": uuid, "clickcount": 0, "votes": 0, "t": 0}
-    save_stats(stats)
+    known = load_stats()
+    merge_stats({url: {"uuid": uuid, "clickcount": 0, "votes": 0, "t": 0}
+                 for url, uuid in pairs if known.get(url, {}).get("uuid") != uuid})
 
 def station_stats(urls):
-    # Números do radio-browser das estações, guardados por um dia. As de uuid
-    # conhecido atualizam-se num só pedido; as outras procuram-se pelo URL, em paralelo
+    # Números e detalhes do radio-browser das estações, guardados por um dia. As
+    # de uuid conhecido atualizam-se num só pedido; as outras procuram-se pelo URL, em paralelo
     stats = load_stats()
     now = time.time()
+    updates = {}
     def stale():
-        return [u for u in urls if now - stats.get(u, {}).get("t", 0) > STATS_MAX_AGE]
+        return [u for u in urls if u not in updates and stats_stale(stats.get(u, {}), now)]
     by_uuid = {stats[u]["uuid"]: u for u in stale() if stats.get(u, {}).get("uuid")}
     uuids = list(by_uuid)
     for i in range(0, len(uuids), 100):
         try:
             for st in api_get("/json/stations/byuuid", uuids=",".join(uuids[i:i + 100])):
                 if st.get("stationuuid") in by_uuid:
-                    stats[by_uuid[st["stationuuid"]]] = stat_entry(st)
+                    updates[by_uuid[st["stationuuid"]]] = stat_entry(st)
         except (OSError, ValueError):
             break
     def lookup(url):
@@ -290,17 +322,38 @@ def station_stats(urls):
         try:
             found = api_get("/json/stations/byurl", url=url)
         except (OSError, ValueError):
-            return url, {**old, "t": now - STATS_MAX_AGE + STATS_RETRY_SECONDS}
+            return url, {**old, "v": STATS_VERSION, "t": now - STATS_MAX_AGE + STATS_RETRY_SECONDS}
         # A mesma rádio aparece várias vezes; fica a mais ouvida
         best = max(found, key=lambda st: int(st.get("clickcount") or 0), default=None)
-        return url, stat_entry(best) if best else {"uuid": None, "clickcount": 0, "votes": 0, "t": now}
+        return url, stat_entry(best) if best else {"v": STATS_VERSION, "uuid": None, "clickcount": 0, "votes": 0, "t": now}
     missing = stale()
     if missing:
         with ThreadPoolExecutor(max_workers=8) as pool:
-            stats.update(pool.map(lookup, missing))
-    if uuids or missing:
-        save_stats(stats)
-    return stats
+            updates.update(pool.map(lookup, missing))
+    return merge_stats(updates) if updates else stats
+
+# Estações a ser procuradas em segundo plano para a barra, para não pedir a mesma duas vezes
+_refreshing = set()
+_refreshing_lock = threading.Lock()
+
+def station_details(url):
+    # Detalhes da estação a tocar, só do que está guardado: a barra é pedida a
+    # cada 5 segundos e não pode esperar pela API. Se faltarem ou estiverem
+    # velhos, procura-os em segundo plano e a barra mostra-os no pedido seguinte
+    entry = load_stats().get(url, {})
+    if stats_stale(entry, time.time()):
+        with _refreshing_lock:
+            if url in _refreshing:
+                return entry
+            _refreshing.add(url)
+        def refresh():
+            try:
+                station_stats([url])
+            finally:
+                with _refreshing_lock:
+                    _refreshing.discard(url)
+        threading.Thread(target=refresh, daemon=True).start()
+    return entry
 
 @app.template_filter("compact")
 def compact(n):
@@ -390,7 +443,13 @@ def player_context(status, current, info):
         volume = int(status.get("volume", -1))
     except ValueError:
         volume = -1
+    details = station_details(current["file"]) if current.get("file") else {}
+    # O bitrate do MPD é o real, enquanto toca; o da API é o anunciado pela rádio
+    live = status.get("bitrate")
+    kbps = int(live) if playing and live and live.isdigit() and live != "0" else details.get("bitrate") or 0
     return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
+            "details": details, "kbps": kbps,
+            "voted": time.time() - (details.get("voted_at") or 0) < VOTE_COOLDOWN,
             "current_station": display_name(current) if current.get("file") else "",
             "current_title": clean_title(current.get("title", "")),
             "current_key": logo_key(current["file"]) if current.get("file") else "",
@@ -456,16 +515,17 @@ def redirect_for_script(response):
     return response
 
 @app.route("/estado")
-def estado():
+def estado(notice=None):
     # Estado do reprodutor para o script: a barra já feita em HTML (o mesmo
-    # template da página) e o que é preciso para saber se a página mudou
+    # template da página) e o que é preciso para saber se a página mudou.
+    # O notice é uma mensagem curta para o script mostrar (por exemplo, depois de votar)
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
     player = player_context(status, current, station_info())
     return jsonify(player=render_template("player.html", **player), pos=player["current_pos"],
                    station=player["current_station"], playing=status.get("state") == "play",
-                   queue=status.get("playlist", ""), error=status.get("error", ""))
+                   queue=status.get("playlist", ""), error=status.get("error", ""), notice=notice)
 
 def back():
     # Volta à página de onde veio o formulário (resultados da pesquisa, lista
@@ -673,6 +733,30 @@ def next_station():
     with mpd_client() as c:
         step(c, +1)
     return done()
+
+@app.route("/vote", methods=["POST"])
+def vote():
+    # Vota no radio-browser na estação que está a tocar. O voto conta para o IP
+    # do telemóvel, que só pode votar na mesma rádio uma vez a cada 10 minutos
+    with mpd_client() as c:
+        url = c.currentsong().get("file")
+    entry = load_stats().get(url, {}) if url else {}
+    uuid = entry.get("uuid") or ""
+    if not UUID_RE.match(uuid):
+        notice = {"ok": False, "text": "Esta rádio não está no radio-browser.info."}
+    else:
+        try:
+            answer = api_get("/json/vote/" + uuid)
+        except (OSError, ValueError):
+            answer = {}
+        if answer.get("ok"):
+            merge_stats({url: {**entry, "votes": entry.get("votes", 0) + 1, "voted_at": time.time()}})
+            notice = {"ok": True, "text": "Voto registado no radio-browser.info."}
+        elif "often" in str(answer.get("message", "")):
+            notice = {"ok": False, "text": "Já votaste nesta rádio há pouco. Só se pode votar uma vez a cada 10 minutos."}
+        else:
+            notice = {"ok": False, "text": "Não foi possível votar. Tenta outra vez."}
+    return estado(notice) if from_script() else back()
 
 @app.route("/play", methods=["POST"])
 def play():

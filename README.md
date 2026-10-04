@@ -105,7 +105,7 @@ curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.s
 ## Comando web
 
 - **Estações**: procurar pelo nome na lista atual e ordená-la pela ordem da playlist, pelas mais ouvidas ou mais votadas no radio-browser.info, ou de A a Z (só muda o que se vê, a playlist fica igual). Os números do radio-browser ficam guardados no telemóvel por um dia, por isso a primeira vez pode demorar uns segundos
-- **Reprodutor** (barra fixa no fundo, como no Spotify): estação e faixa atuais, tocar ou parar, estação anterior e seguinte, volume (±5%)
+- **Reprodutor** (barra fixa no fundo, como no Spotify): estação e faixa atuais, tocar ou parar, estação anterior e seguinte, volume (±5%). Com os dados do radio-browser.info mostra também a bandeira do país, a qualidade do stream e os géneros (no telemóvel, só a qualidade), um botão para abrir o site da rádio e outro para votar nela (o radio-browser só aceita um voto na mesma rádio a cada 10 minutos)
 - **Estações**: a lista de rádios da playlist ativa, cujo nome aparece no topo. Toca-se numa estação para a ouvir e o ✕ remove-a.
 - **Juntar rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, filtrando por país, língua e qualidade mínima e ordenando pelas mais ouvidas, mais votadas, em alta ou aleatórias, ou colar o URL de um stream com um nome opcional
 - **Temas**: escolher um tema (Notícias, Jazz, Fado, Anos 80...), com os mesmos filtros, e juntar as rádios desse tema a uma playlist nova ou já existente, todas de uma vez ou uma a uma

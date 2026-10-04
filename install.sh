@@ -47,7 +47,7 @@ main() {
     else
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
-    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh"
+    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh"
     # Configuração local (tópico do ntfy); nunca se substitui um .env que já exista
     if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
         cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
@@ -63,18 +63,16 @@ main() {
     echo "=== 6. A criar atalhos na pasta pessoal ==="
     ln -sf "$INSTALL_DIR/start.sh" ~/start.sh
     ln -sf "$INSTALL_DIR/stop.sh" ~/stop.sh
+    ln -sf "$INSTALL_DIR/config.sh" ~/config.sh
 
     echo "=== 7. A configurar o arranque automático (Termux:Boot) ==="
     mkdir -p ~/.termux/boot
     cat > ~/.termux/boot/vee-radio <<'BOOT'
 #!/data/data/com.termux/files/usr/bin/bash
 termux-wake-lock
-# No arranque do telemóvel a rede pode demorar; espera até 2 minutos pela internet
-for _ in $(seq 1 24); do
-    curl -s -o /dev/null --max-time 5 https://www.cloudflare.com && break
-    sleep 5
-done
-~/start.sh > ~/boot.log 2>&1
+# O start.sh espera pela internet só se o túnel estiver ligado (--boot); sem
+# túnel, a rádio e o comando local arrancam logo
+~/start.sh --boot > ~/boot.log 2>&1
 BOOT
     chmod +x ~/.termux/boot/vee-radio
 

@@ -1,11 +1,14 @@
 import hashlib
+import hmac
 import html
 import http.client
 import ipaddress
 import json
 import os
 import re
+import secrets
 import socket
+import subprocess
 import threading
 import time
 import unicodedata
@@ -41,6 +44,17 @@ PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
 NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
 # Playlist que está carregada na fila; o start.sh volta a carregá-la se a fila estiver vazia
 ACTIVE_FILE = os.path.expanduser("~/.config/mpd/playlist-ativa.txt")
+# Configuração local (túnel e ntfy), lida pelo start.sh. Muda-se na janela
+# Configurações, que só aparece no próprio telemóvel (is_local)
+ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+ENV_EXAMPLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.example")
+START_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start.sh")
+RESTART_LOG = os.path.expanduser("~/restart.log")
+# Chave das Configurações: as outras apps do telemóvel também chegam a
+# localhost:8080, mas este ficheiro só o Termux o lê. O start.sh (sem túnel) e o
+# ~/config.sh abrem /entrar com ela, e o browser fica com ela num cookie
+CONFIG_KEY_FILE = os.path.expanduser("~/.config/vee-radio/chave")
+CONFIG_COOKIE = "vee_config"
 # Escrito pelo start.sh com o link do Cloudflare Tunnel. Não aparece na página (é a
 # chave de acesso e chega por ntfy ou pela página local); só serve para validar o Origin
 TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
@@ -627,7 +641,7 @@ def render_index(results=None, query="", filters=None, theme=None):
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme,
-                                  hint=STREAM_FAILED_HINT)
+                                  hint=STREAM_FAILED_HINT, config=config_context() if can_configure() else None)
 
 def tunnel_host():
     try:
@@ -648,6 +662,39 @@ def known_host(hostname):
         return True
     except ValueError:
         return False
+
+def is_local():
+    # Só o browser do próprio telemóvel (http://localhost:8080). Pelo túnel o pedido
+    # também chega de 127.0.0.1, mas a Cloudflare junta sempre o Cf-Connecting-IP
+    # (quem o tenta mandar vê-o substituído) e o cloudflared o X-Forwarded-For
+    if any(h in request.headers for h in ("Cf-Connecting-IP", "Cf-Ray", "X-Forwarded-For")):
+        return False
+    hostname = urllib.parse.urlsplit("//" + request.host).hostname or ""
+    return request.remote_addr in ("127.0.0.1", "::1") and hostname in ("localhost", "127.0.0.1", "::1")
+
+def config_key():
+    try:
+        with open(CONFIG_KEY_FILE, encoding="utf-8") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return ""
+
+def ensure_config_key():
+    if config_key():
+        return
+    os.makedirs(os.path.dirname(CONFIG_KEY_FILE), exist_ok=True)
+    try:
+        fd = os.open(CONFIG_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    with open(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write(secrets.token_urlsafe(24) + "\n")
+
+def same_key(given, key):
+    return bool(key) and hmac.compare_digest(given.encode("utf-8"), key.encode("utf-8"))
+
+def can_configure():
+    return is_local() and same_key(request.cookies.get(CONFIG_COOKIE, ""), config_key())
 
 @app.before_request
 def check_origin():
@@ -1080,5 +1127,130 @@ def delete_playlist():
             set_active("")
     return redirect("/#playlists")
 
+# Configurações (.env). Lidas como o env_value do start.sh: KEY=valor, a última
+# ocorrência ganha e tiram-se as aspas das pontas
+ENV_LINE_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+NTFY_TOPIC_RE = re.compile(r"^(https?://[^\s\"'<>]+|[A-Za-z0-9_-]{1,64})$")
+NTFY_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,256}$")
+NTFY_MIN_TOPIC = 16
+TUNNEL_OFF = ("0", "false", "off", "no", "nao", "não")
+
+def read_env():
+    values = {}
+    try:
+        with open(ENV_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return values
+    for line in lines:
+        m = ENV_LINE_RE.match(line.replace("\r", ""))
+        if m:
+            value = m.group(2)
+            if value[:1] in "\"'":
+                value = value[1:]
+            if value[-1:] in "\"'":
+                value = value[:-1]
+            values[m.group(1)] = value
+    return values
+
+def write_env(updates):
+    # Muda só as chaves pedidas e mantém os comentários; sem .env, parte do .env.example
+    try:
+        with open(ENV_FILE, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        try:
+            with open(ENV_EXAMPLE, encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except FileNotFoundError:
+            lines = []
+    out, done = [], set()
+    for line in lines:
+        m = ENV_LINE_RE.match(line.replace("\r", ""))
+        key = m.group(1) if m else None
+        if key in updates:
+            if key not in done:
+                out.append(f"{key}={updates[key]}")
+                done.add(key)
+            continue
+        out.append(line.replace("\r", ""))
+    out += [f"{k}={v}" for k, v in updates.items() if k not in done]
+    tmp = ENV_FILE + ".tmp"
+    # O .env tem o token do ntfy: só o Termux o pode ler
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with open(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(out) + "\n")
+    os.replace(tmp, ENV_FILE)
+
+def tunnel_enabled(values):
+    return values.get("TUNNEL_ENABLED", "1").strip().lower() not in TUNNEL_OFF
+
+def weak_ntfy_topic(topic, token):
+    # A mesma regra do start.sh: no ntfy.sh público, sem token, quem adivinhar o tópico recebe o link
+    if not topic or token:
+        return False
+    if topic.startswith(("http://", "https://")):
+        if urllib.parse.urlsplit(topic).hostname != "ntfy.sh":
+            return False
+    return len(topic.rstrip("/").rsplit("/", 1)[-1]) < NTFY_MIN_TOPIC
+
+def config_context():
+    values = read_env()
+    return {"tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
+            "has_token": bool(values.get("NTFY_TOKEN")), "suggestion": "radio-" + secrets.token_hex(8),
+            "saved": request.args.get("config") == "guardada"}
+
+@app.route("/entrar")
+def enter():
+    # Dá ao browser do telemóvel a chave das Configurações; o link vem do Termux
+    # (~/config.sh ou o start.sh sem túnel), que é o único que lê a chave
+    if not (is_local() and same_key(request.args.get("chave", ""), config_key())):
+        return error_page("Chave inválida", "Abre as configurações a partir do Termux, com ~/config.sh.", 403)
+    response = redirect("/#config" if request.args.get("ir") == "config" else "/")
+    response.set_cookie(CONFIG_COOKIE, config_key(), max_age=365 * 24 * 3600, httponly=True, samesite="Strict")
+    return response
+
+def restart_all():
+    # Volta a correr o start.sh numa sessão à parte: ele termina este servidor, e
+    # assim não morre com ele. Os 2 segundos deixam a resposta chegar ao browser
+    log = open(RESTART_LOG, "ab")
+    subprocess.Popen(["bash", "-c", 'sleep 2; exec "$0"', START_SCRIPT], stdin=subprocess.DEVNULL,
+                     stdout=log, stderr=log, start_new_session=True, close_fds=True,
+                     env={**os.environ, "VEE_RADIO_NO_OPEN": "1"})
+    log.close()
+
+@app.route("/config", methods=["POST"])
+def config():
+    if not can_configure():
+        return error_page("Sem acesso", "As configurações só se mudam no próprio telemóvel: abre-as no Termux com ~/config.sh.", 403)
+    topic = request.form.get("ntfy_topic", "").strip()
+    new_token = request.form.get("ntfy_token", "").strip()
+    old_token = read_env().get("NTFY_TOKEN", "")
+    token = "" if request.form.get("clear_token") else new_token or old_token
+    if topic and not NTFY_TOPIC_RE.match(topic):
+        return error_page("Tópico inválido", "O tópico do ntfy é um nome só com letras, números, - e _ (até 64), "
+                          "ou o endereço completo de um servidor (https://...).", 400)
+    if new_token and not NTFY_TOKEN_RE.match(new_token):
+        return error_page("Token inválido", "O token do ntfy só tem letras, números, ponto, - e _.", 400)
+    if weak_ntfy_topic(topic, token):
+        return error_page("Tópico fácil de adivinhar", f"No ntfy.sh, sem token, o tópico tem de ter pelo menos "
+                          f"{NTFY_MIN_TOPIC} caracteres: quem o souber recebe o link e controla a rádio.", 400)
+    write_env({"TUNNEL_ENABLED": "1" if request.form.get("tunnel") else "0",
+               "NTFY_TOPIC_URL": topic, "NTFY_TOKEN": token})
+    if not request.form.get("aplicar"):
+        return redirect("/?config=guardada#config")
+    restart_all()
+    if request.form.get("tunnel"):
+        link = ("O link público muda: o novo chega pelo ntfy." if topic
+                else "O link público muda: abre-se a página para o partilhar.")
+    else:
+        link = "Sem túnel, o comando fica só neste telemóvel e na rede local."
+    response = Response(render_template("error.html", title="A reiniciar…",
+                                        message=f"A música para durante alguns segundos. {link} Esta página volta sozinha."), 202)
+    # Sem JavaScript o browser volta à página sozinho; com ele, o app.js faz o mesmo
+    response.headers["Refresh"] = "12; url=/"
+    return response
+
 if __name__ == "__main__":
+    ensure_config_key()
     app.run(host="0.0.0.0", port=8080)

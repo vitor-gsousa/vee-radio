@@ -35,7 +35,7 @@
         .search-box input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
         .search-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; line-height: 28px; text-align: center; border-radius: 14px; color: #a6adc8; text-decoration: none; font-size: 14px; }
         .search-clear:hover { background: #45475a; color: #cdd6f4; }
-        input[type="text"], input[type="search"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
+        input[type="text"], input[type="search"], input[type="password"] { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; border-radius: 6px; border: 1px solid #45475a; background: #313244; color: #fff; font-size: 16px; }
         .card { background: #181825; padding: 15px; border-radius: 10px; margin-bottom: 20px; text-align: left; }
         .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
         /* Procurar e ordenar a lista: numa linha própria no telemóvel, ao lado do título no PC */
@@ -95,6 +95,10 @@
         .filters select { min-width: 0; padding: 10px 6px; font-size: 15px; text-overflow: ellipsis; }
         .refine button { margin: 0 0 6px; padding: 10px; font-size: 14px; }
         .theme-add label { display: block; margin: 8px 0 0 4px; }
+        .check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px 4px; }
+        .check input { width: 18px; height: 18px; margin: 0; }
+        label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
+        .saved { color: #a6e3a1; margin: 4px 0 8px 4px; }
 
         /* Barra de navegação no topo. O box-shadow e o clip-path estendem o fundo
            à largura do ecrã sem criar scroll horizontal */

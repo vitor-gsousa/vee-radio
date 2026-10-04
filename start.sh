@@ -2,6 +2,10 @@
 DIR="$(dirname "$(readlink -f "$0")")"
 LINK_PORT=8081
 LINK_DIR="$HOME/.vee-radio-link"
+CONFIG_KEY_FILE="$HOME/.config/vee-radio/chave"
+# --boot: chamado pelo Termux:Boot, quando a rede ainda pode não estar pronta
+BOOT=0
+[ "${1:-}" = "--boot" ] && BOOT=1
 
 # Lê um valor do .env (KEY=valor), sem o executar como código; aceita aspas
 # e terminações de linha do Windows
@@ -25,6 +29,15 @@ ntfy_curl() {
 }
 
 # Envia o link para o tópico do ntfy; falha se não houver tópico ou se o envio não correr bem
+# Túnel ligado, a não ser que o .env diga o contrário (TUNNEL_ENABLED=0); sem a
+# chave fica ligado, como antes de haver a opção
+tunnel_enabled() {
+    case "$(env_value TUNNEL_ENABLED | tr '[:upper:]' '[:lower:]')" in
+        0|false|off|no|nao|não) return 1 ;;
+    esac
+    return 0
+}
+
 send_ntfy() {
     local topic token
     topic="$(env_value NTFY_TOPIC_URL)"
@@ -96,6 +109,35 @@ fi
 
 echo "A iniciar servidor Web (porta 8080)..."
 nohup python "$DIR/radio_web.py" > ~/web.log 2>&1 &
+
+# Sem túnel (TUNNEL_ENABLED=0 no .env, ou desligado nas Configurações do comando):
+# o comando fica só neste telemóvel e na rede local, e abre-se já no browser
+if ! tunnel_enabled; then
+    for _ in $(seq 1 50); do
+        curl -s -o /dev/null --max-time 2 http://127.0.0.1:8080/ && break
+        sleep 0.2
+    done
+    # Abre o comando já com a chave das Configurações (o comando web cria-a ao
+    # arrancar). Ao reiniciar pelas Configurações não se abre outra vez: já está aberto
+    if [ -z "${VEE_RADIO_NO_OPEN:-}" ]; then
+        termux-open-url "http://localhost:8080/entrar?chave=$(cat "$CONFIG_KEY_FILE" 2>/dev/null)" 2>/dev/null || true
+    fi
+    echo ""
+    echo "Túnel desligado (TUNNEL_ENABLED=0 no .env): sem link público."
+    echo "Comando neste telemóvel: http://localhost:8080"
+    echo "Na rede local: http://<IP-do-telemóvel>:8080"
+    echo "Já podes fechar o Termux: tudo continua a correr em segundo plano."
+    exit 0
+fi
+
+# No arranque do telemóvel a rede pode demorar; espera até 2 minutos pela
+# internet antes de criar o túnel (a rádio e o comando local já estão a correr)
+if [ "$BOOT" = 1 ]; then
+    for _ in $(seq 1 24); do
+        curl -s -o /dev/null --max-time 5 https://www.cloudflare.com && break
+        sleep 5
+    done
+fi
 
 echo "A iniciar Cloudflare Tunnel..."
 nohup cloudflared tunnel --url http://localhost:8080 > ~/tunnel.log 2>&1 &

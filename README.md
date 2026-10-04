@@ -11,6 +11,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `templates/` | Páginas do comando web; no telemóvel ficam numa coluna e no PC em duas |
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
+| `config.sh` | Abre as configurações do comando no browser do telemóvel |
 | `.env.example` | Modelo da configuração local (tópico do ntfy); a cópia `.env` não vai para o git |
 | `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
@@ -77,6 +78,28 @@ No `ntfy.sh` qualquer pessoa que saiba o nome do tópico recebe o link, e quem t
 
 Para tudo e liberta o wake lock.
 
+### Usar sem acesso pela internet
+
+Se só quiseres controlar a rádio no próprio telemóvel ou na rede de casa, desliga o túnel no `.env`:
+
+```
+TUNNEL_ENABLED=0
+```
+
+Assim o `start.sh` não cria o link público, não envia nada para o ntfy e abre o comando no browser do telemóvel, em `http://localhost:8080`. Na rede local continua a funcionar em `http://<IP-do-telemóvel>:8080`. Sem esta linha (ou com `1`) o túnel fica ligado.
+
+### Configurações
+
+Para ligar ou desligar o túnel e mudar o tópico e o token do ntfy sem editar o `.env` à mão, corre no Termux:
+
+```bash
+~/config.sh
+```
+
+Abre o comando no browser do telemóvel com a janela **Configurações**, e a partir daí o botão **⚙** fica na barra de cima desse browser. Sem túnel, o `start.sh` já abre o comando assim. **Guardar** aplica-se no próximo arranque; **Guardar e aplicar agora** reinicia já a rádio (a música para uns segundos e, com o túnel, o link muda).
+
+As configurações não aparecem pelo link do túnel nem na rede local, e precisam de uma chave que só o Termux lê (`~/.config/vee-radio/chave`). Quem tivesse o link, ou outra app do telemóvel, podia trocar o tópico pelo seu e passar a receber os links seguintes.
+
 ### Arranque automático
 
 Para a rádio arrancar sozinha sempre que o telemóvel liga:
@@ -85,7 +108,7 @@ Para a rádio arrancar sozinha sempre que o telemóvel liga:
 2. Abre o Termux:Boot uma vez. Sem isso, o Android não o deixa correr no arranque.
 3. Nas definições do Android, desativa a otimização de bateria para o **Termux** e para o **Termux:Boot**.
 
-No arranque, o script espera até 2 minutos pela internet e depois corre o `~/start.sh`. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
+No arranque, o script corre o `~/start.sh`: a rádio e o comando local arrancam logo e, com o túnel ligado, espera-se até 2 minutos pela internet antes de o criar. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
 
 ## Atualizar
 

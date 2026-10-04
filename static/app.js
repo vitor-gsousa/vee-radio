@@ -178,6 +178,10 @@
         if (response.status === 204) return true;
         // Páginas de erro também chegam aqui e substituem a página, como sem script
         swap(await response.text(), response.ok ? url : null, push);
+        // "A reiniciar": o cabeçalho Refresh só vale para a navegação normal, por
+        // isso volta-se à página principal à mão quando passar o tempo indicado
+        var refresh = parseInt(response.headers.get("Refresh") || "", 10);
+        if (refresh > 0) setTimeout(function () { location.assign("/"); }, refresh * 1000);
         return true;
     }
 

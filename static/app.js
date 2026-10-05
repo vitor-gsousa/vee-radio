@@ -83,6 +83,16 @@
         });
     }
 
+    // A faixa "Anular" depois do ✕ só vale uns minutos: esconde-se quando o tempo
+    // acaba (sem script, desaparece na página seguinte)
+    var undoTimer = null;
+    function scheduleUndo() {
+        clearTimeout(undoTimer);
+        var bar = document.querySelector(".undo");
+        var left = bar && parseInt(bar.dataset.left, 10);
+        if (left > 0) undoTimer = setTimeout(function () { bar.remove(); }, left * 1000);
+    }
+
     // Blocos a brilhar com a forma dos resultados, enquanto se espera pela API
     function skeletonRows(count) {
         var row = '<div class="skel-row"><span class="skel skel-thumb"></span><div class="skel-body">' +
@@ -168,6 +178,7 @@
         markLoadedImages();
         restoreFocus(focus);
         updateTitle();
+        scheduleUndo();
     }
 
     async function handle(response, url, push) {
@@ -207,7 +218,7 @@
         if (tile && tile.classList.contains("pending")) return;
         // O "next" dos cartões foi escrito com o URL de quando a página foi feita;
         // o filtro escrito entretanto só está no URL atual
-        var next = tile && form.querySelector('input[name="next"]');
+        var next = (tile || form.closest(".undo")) && form.querySelector('input[name="next"]');
         if (next) next.value = listUrl();
         // "+ Juntar" no reprodutor volta à página que está aberta (por exemplo, aos
         // resultados, para mostrar o ✓), e não sempre a /
@@ -386,6 +397,7 @@
         syncModals();
         markLoadedImages();
         updateTitle();
+        scheduleUndo();
         setInterval(poll, POLL_MS);
     });
 })();

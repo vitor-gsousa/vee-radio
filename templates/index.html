@@ -106,12 +106,26 @@
     </div>
     {% endif %}
 
+    {# Depois do ✕: anular durante UNDO_SECONDS. O script esconde-a quando o tempo acaba #}
+    {% if removed %}
+    <div class="undo" data-left="{{ removed.left }}">
+        <span>«{{ removed.name }}» saiu da lista.</span>
+        <form action="/anular" method="post">
+            <input type="hidden" name="next" value="{{ list_url }}">
+            <button>Anular</button>
+        </form>
+    </div>
+    {% endif %}
+
     <div class="card" id="estacoes" data-queue="{{ queue_sig }}">
         <div class="card-head">
             <div>
                 <h3>{{ active or 'Estações' }}</h3>
                 <div class="meta">{% if active %}Playlist · as alterações ficam guardadas{% else %}Estas estações não estão guardadas{% endif %}</div>
             </div>
+            {% if not active and stations %}
+            <a class="btn btn-blue save-list" href="#nova">Guardar como playlist</a>
+            {% endif %}
             {% if stations|length > 1 or list_filter %}
             {# Sem JavaScript filtra com Enter e ordena com o OK; com ele, filtra enquanto se escreve #}
             <form class="list-tools" action="/" method="get" role="search">
@@ -142,9 +156,6 @@
             <p class="meta empty">Ainda não há estações. <a href="#juntar">Descobre rádios</a> por nome, tema ou país para começar.</p>
         {% endif %}
         </div>
-        {% if not active and stations %}
-            <a class="btn" href="#nova">Guardar como playlist</a>
-        {% endif %}
     </div>
 
     <div class="modal" id="playlists">
@@ -193,9 +204,9 @@
                 {% if stations %}
                 <button class="btn-green" name="from" value="atuais">Criar com as {{ stations|length }} estações atuais</button>
                 {% endif %}
-                <button class="btn-blue" name="from" value="vazia">Criar vazia</button>
+                <button{% if stations %} class="stop"{% else %} class="btn-blue"{% endif %} name="from" value="vazia">Criar vazia{% if stations %} e parar a música{% endif %}</button>
             </form>
-            <p class="meta">A nova playlist passa a ser a da página principal.{% if stations %} Se a criares vazia, a música para até juntares uma rádio.{% endif %}</p>
+            <p class="meta">A nova playlist passa a ser a da página principal.{% if stations %} Vazia, a lista fica sem estações até juntares uma rádio; a playlist atual continua guardada.{% endif %}</p>
         </div>
     </div>
 

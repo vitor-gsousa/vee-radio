@@ -597,15 +597,46 @@ def read_preview():
         return None
     return preview if isinstance(preview, dict) and safe_url(preview.get("url") or "") else None
 
-def set_preview(entry):
+def write_state(path, entry):
+    # Pequenos ficheiros de estado em JSON; None apaga-o
     if entry:
-        os.makedirs(os.path.dirname(PREVIEW_FILE), exist_ok=True)
-        tmp = PREVIEW_FILE + ".tmp"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(entry, f)
-        os.replace(tmp, PREVIEW_FILE)
-    elif os.path.exists(PREVIEW_FILE):
-        os.remove(PREVIEW_FILE)
+        os.replace(tmp, path)
+    elif os.path.exists(path):
+        os.remove(path)
+
+def set_preview(entry):
+    write_state(PREVIEW_FILE, entry)
+
+# Última estação removida com o ✕, para se poder anular durante uns minutos. O
+# nome e o logótipo vão com ela: se só estavam nessa playlist, saíram com a remoção
+REMOVED_FILE = os.path.expanduser("~/.config/vee-radio/removida.json")
+UNDO_SECONDS = 120
+
+def read_removed():
+    # {"url", "name", "logo", "pos", "playlist", "t"}, só enquanto se pode anular
+    # e se a playlist ativa ainda é a mesma
+    try:
+        with open(REMOVED_FILE, encoding="utf-8") as f:
+            removed = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return None
+    if not isinstance(removed, dict) or not safe_url(removed.get("url") or ""):
+        return None
+    if time.time() - to_int(removed.get("t")) >= UNDO_SECONDS or removed.get("playlist") != active_playlist():
+        return None
+    return removed
+
+def removed_context():
+    # A faixa "Anular" da página, com os segundos que faltam para o script a esconder
+    removed = read_removed()
+    if not removed:
+        return None
+    return {"name": removed.get("name") or removed["url"],
+            "left": max(1, UNDO_SECONDS - int(time.time() - to_int(removed.get("t"))))}
 
 def preview_song(queue):
     # A entrada da fila que está a ser experimentada, ou None
@@ -638,10 +669,16 @@ def queue_entries(c):
         entries.append((s["file"], known.get("name") or s.get("name"), known.get("logo")))
     return entries
 
-def sync_active(c):
+def sync_active(c, restore=None):
+    # restore: URL -> (nome, logótipo) de estações que voltam e que já não estão
+    # em nenhum ficheiro (anular a remoção)
     name = active_playlist()
     if name:
-        write_m3u(playlist_path(name), queue_entries(c))
+        entries = queue_entries(c)
+        if restore:
+            entries = [(u, n or restore.get(u, (None, None))[0], l or restore.get(u, (None, None))[1])
+                       for u, n, l in entries]
+        write_m3u(playlist_path(name), entries)
 
 def error_page(title, message, code):
     return render_template("error.html", title=title, message=message), code
@@ -770,7 +807,8 @@ def render_index(results=None, query="", filters=None, theme=None):
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme,
-                                  hint=STREAM_FAILED_HINT, config=config_context() if can_configure() else None)
+                                  hint=STREAM_FAILED_HINT, removed=removed_context(),
+                                  config=config_context() if can_configure() else None)
 
 def tunnel_host():
     try:
@@ -1332,12 +1370,43 @@ def add_stream():
 @app.route("/remove/<int:song_id>", methods=["POST"])
 def remove(song_id):
     with QUEUE_LOCK, mpd_client() as c:
+        queue = listed(c.playlistinfo())
+        pos = next((i for i, s in enumerate(queue) if s["id"] == str(song_id)), None)
+        # O nome e o logótipo lidos antes: a sincronização tira-os da playlist
+        known = station_info().get(queue[pos]["file"], {}) if pos is not None else {}
         try:
             c.deleteid(song_id)
         except CommandError:
             # Já tinha sido removida (noutro aparelho, ou com dois toques no ✕)
-            pass
+            pos = None
         sync_active(c)
+        if pos is not None:
+            song = queue[pos]
+            write_state(REMOVED_FILE, {"url": song["file"], "name": known.get("name") or display_namer({})(song),
+                                       "logo": known.get("logo"), "pos": pos, "playlist": active_playlist(),
+                                       "t": int(time.time())})
+    return back()
+
+@app.route("/anular", methods=["POST"])
+def undo_remove():
+    # Volta a pôr a última estação removida no mesmo sítio da lista
+    with QUEUE_LOCK, mpd_client() as c:
+        removed = read_removed()
+        if removed:
+            url = removed["url"]
+            queue = c.playlistinfo()
+            if url not in {s["file"] for s in queue}:
+                shown = listed(queue)
+                pos = to_int(removed.get("pos"))
+                c.addid(url, int(shown[pos]["pos"]) if pos < len(shown) else len(queue))
+            else:
+                # Entretanto estava a ser experimentada: passa a ser da lista
+                preview = read_preview()
+                if preview and preview["url"] == url:
+                    set_preview(None)
+            logo = removed.get("logo")
+            sync_active(c, {url: (removed.get("name"), logo if LOGO_URL_RE.match(logo or "") else None)})
+            write_state(REMOVED_FILE, None)
     return back()
 
 @app.route("/load_playlist", methods=["POST"])

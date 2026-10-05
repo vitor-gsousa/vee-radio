@@ -100,9 +100,19 @@
     </nav>
 
     {% if status.error %}
+    {# Com saída: tocar outra, procurar a rádio outra vez (o endereço pode ter mudado) ou removê-la #}
     <div class="warn" id="aviso">
-        <strong>A última rádio não tocou.</strong> {{ hint }}
+        <strong>{% if failed %}«{{ failed.name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> O endereço pode ter mudado ou a rádio pode estar em baixo.
         <div class="meta">{{ status.error }}</div>
+        <div class="warn-actions">
+            {% if stations %}
+            <form action="/next" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button>Tocar a seguinte</button></form>
+            {% endif %}
+            {% if failed %}
+            <a class="btn" href="/search?q={{ failed.name|urlencode }}#juntar">Procurar outra vez</a>
+            <form action="/remove/{{ failed.id }}" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="stop">Remover</button></form>
+            {% endif %}
+        </div>
     </div>
     {% endif %}
 
@@ -135,6 +145,8 @@
             </form>
             {% endif %}
         </div>
+        {# A ordenação e o filtro só mudam o que se vê; o script mostra ou esconde a nota enquanto se escreve #}
+        <p class="meta order-note" id="nota-ordem"{% if not (list_order or list_filter) %} hidden{% endif %}>⏮ ⏭ seguem a ordem da playlist, incluindo as estações que o filtro esconde.</p>
         <div class="stations">
         {% for s in stations %}
             <div class="tile{% if s.current %} current{% endif %}" id="e{{ s.id }}" data-id="{{ s.id }}" data-plain="{{ s.plain }}"{% if s.hidden %} hidden{% endif %}>

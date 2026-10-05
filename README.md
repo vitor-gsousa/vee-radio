@@ -128,7 +128,7 @@ curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.s
 
 ## Comando web
 
-- **Estações**: procurar pelo nome na lista atual e ordená-la pela ordem da playlist, pelas mais ouvidas, mais votadas ou pelas tendências (as que ganharam mais cliques desde o dia anterior) no radio-browser.info, ou de A a Z (só muda o que se vê, a playlist fica igual). Os números do radio-browser ficam guardados no telemóvel por um dia, por isso a primeira vez pode demorar uns segundos
+- **Estações**: procurar pelo nome na lista atual e ordená-la pela ordem da playlist, pelas mais ouvidas, mais votadas ou pelas tendências (as que ganharam mais cliques desde o dia anterior) no radio-browser.info, ou de A a Z (só muda o que se vê: a playlist fica igual e ⏮ ⏭ seguem a ordem dela, como avisa uma nota por baixo da pesquisa). Os números do radio-browser ficam guardados no telemóvel por um dia, por isso a primeira vez pode demorar uns segundos
 - **Reprodutor** (barra fixa no fundo, como no Spotify): estação e faixa atuais, tocar ou parar, estação anterior e seguinte, volume (±5%). Com os dados do radio-browser.info mostra também a bandeira do país, a qualidade do stream e os géneros, e, junto da estação, um botão para abrir o site da rádio e outro para votar nela, com o número de votos (o radio-browser só aceita um voto na mesma rádio a cada 10 minutos). Tocar no nome ou no logótipo mostra a estação na lista
 - **Estações**: a lista de rádios da playlist ativa. Toca-se numa estação para a ouvir e o ✕ remove-a; durante 2 minutos aparece um botão para anular.
 - **Playlists** (o botão com o nome da playlist ativa, na barra de topo): trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists

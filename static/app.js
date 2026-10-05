@@ -93,6 +93,41 @@
         if (left > 0) undoTimer = setTimeout(function () { bar.remove(); }, left * 1000);
     }
 
+    // Os filtros de Descobrir ficam lembrados neste browser (só aqui: não vão para
+    // o telemóvel nem para quem usa o mesmo link). Repõem-se na página principal;
+    // nas páginas de resultados os filtros são os do URL
+    var FILTERS_KEY = "vee-radio-filtros";
+
+    function savedFilters() {
+        try {
+            return JSON.parse(localStorage.getItem(FILTERS_KEY)) || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveFilter(name, value) {
+        var saved = savedFilters();
+        saved[name] = value;
+        try {
+            localStorage.setItem(FILTERS_KEY, JSON.stringify(saved));
+        } catch (e) {
+            // Sem armazenamento (janela privada): os filtros ficam só nesta página
+        }
+    }
+
+    function restoreFilters() {
+        if (location.pathname !== "/") return;
+        var saved = savedFilters();
+        document.querySelectorAll("#juntar .filters select, #temas .filters select, #paises .filters select").forEach(function (sel) {
+            var value = saved[sel.name];
+            // Só valores que ainda existem na lista (um país retirado fica em "Todos")
+            if (typeof value === "string" && Array.prototype.some.call(sel.options, function (o) { return o.value === value; })) {
+                sel.value = value;
+            }
+        });
+    }
+
     // Blocos a brilhar com a forma dos resultados, enquanto se espera pela API
     function skeletonRows(count) {
         var row = '<div class="skel-row"><span class="skel skel-thumb"></span><div class="skel-body">' +
@@ -179,6 +214,7 @@
         restoreFocus(focus);
         updateTitle();
         scheduleUndo();
+        restoreFilters();
     }
 
     async function handle(response, url, push) {
@@ -325,6 +361,9 @@
         });
         var empty = document.getElementById("sem-resultados");
         if (empty) empty.hidden = shown > 0;
+        var note = document.getElementById("nota-ordem");
+        var order = input.form.querySelector('select[name="ordenar"]');
+        if (note) note.hidden = !(input.value.trim() || (order && order.value));
         var url = new URL(location.href);
         if (input.value.trim()) url.searchParams.set("filtro", input.value.trim());
         else url.searchParams.delete("filtro");
@@ -387,6 +426,7 @@
                 var same = m.querySelector('.filters select[name="' + CSS.escape(t.name) + '"]');
                 if (same && same !== t) same.value = t.value;
             });
+            saveFilter(t.name, t.value);
         }
         if (t.form.matches(".refine")) return t.form.requestSubmit();
         var query = t.form.querySelector('input[name="q"]');
@@ -414,6 +454,7 @@
         markLoadedImages();
         updateTitle();
         scheduleUndo();
+        restoreFilters();
         setInterval(poll, POLL_MS);
     });
 })();

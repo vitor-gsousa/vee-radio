@@ -801,6 +801,9 @@ def render_index(results=None, query="", filters=None, theme=None):
         stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
     counts = station_index()[1]
     playlists = [{"name": p, "count": counts.get(p, 0)} for p in stored_playlists]
+    # A estação que falhou, pelo URL na mensagem de erro do MPD ("Failed to decode http://...")
+    error = status.get("error", "")
+    failed = next((s for s in stations if error and s["file"] in error), None)
     return render_template("index.html", **player,
                                   stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
@@ -809,7 +812,7 @@ def render_index(results=None, query="", filters=None, theme=None):
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme,
-                                  hint=STREAM_FAILED_HINT, removed=removed_context(),
+                                  failed=failed, removed=removed_context(),
                                   config=config_context() if can_configure() else None)
 
 def tunnel_host():
@@ -1381,6 +1384,9 @@ def remove(song_id):
         except CommandError:
             # Já tinha sido removida (noutro aparelho, ou com dois toques no ✕)
             pos = None
+        # Removeu-se a rádio do aviso "não tocou": o aviso vai com ela
+        if pos is not None and queue[pos]["file"] in c.status().get("error", ""):
+            c.clearerror()
         sync_active(c)
         if pos is not None:
             song = queue[pos]

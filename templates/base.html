@@ -2,7 +2,10 @@
 <html lang="pt-PT">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# viewport-fit=cover: o Chrome no Android desenha a página por baixo da barra de
+       navegação do sistema; com ele, o env(safe-area-inset-bottom) do CSS diz quanto
+       espaço deixar para o reprodutor não ficar cortado #}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>{% block title %}Comando Rádio{% endblock %}</title>
     {# Opcional: sem ele a página funciona na mesma, com formulários e redirects #}
     <script src="{{ asset_url('app.js') }}" defer></script>

@@ -1,6 +1,6 @@
 /* Estilos do comando. Servido com cache longa: o base.html junta ao URL o hash
    do ficheiro (asset_url), por isso uma alteração chega logo aos browsers */
-body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; padding-bottom: 150px; }
+body { font-family: sans-serif; text-align: center; padding: 20px; background: #1e1e2e; color: #cdd6f4; max-width: 500px; margin: 0 auto; padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 h2, h3 { color: #89b4fa; }
 h3 { margin: 0 0 4px 0; }
 a { color: #89b4fa; }
@@ -128,7 +128,7 @@ label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
 }
 
 /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "side side"; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #11111b; border-top: 1px solid #313244; text-align: left; }
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "side side"; gap: 6px 10px; align-items: center; padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px)); background: #11111b; border-top: 1px solid #313244; text-align: left; }
 .player form { margin: 0; }
 .player-now { grid-area: now; display: flex; gap: 10px; align-items: center; min-width: 0; }
 /* Logótipo e nome: tocar leva ao cartão da estação na lista */
@@ -204,17 +204,17 @@ body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; 
 .tile.flash .tile-play { animation: flash 1.2s ease-out; }
 @keyframes flash { from { box-shadow: 0 0 0 8px #89b4fa; } to { box-shadow: 0 0 0 0 transparent; } }
 .toast.ok { background: #a6e3a1; }
-.toast { position: fixed; left: 50%; bottom: 140px; z-index: 30; transform: translateX(-50%); max-width: 90%; padding: 10px 16px; border-radius: 8px; background: #f38ba8; color: #11111b; font-weight: bold; font-size: 14px; }
+.toast { position: fixed; left: 50%; bottom: calc(140px + env(safe-area-inset-bottom, 0px)); z-index: 30; transform: translateX(-50%); max-width: 90%; padding: 10px 16px; border-radius: 8px; background: #f38ba8; color: #11111b; font-weight: bold; font-size: 14px; }
 
 /* PC: estações em cartões maiores e o reprodutor numa só linha */
 @media (min-width: 900px) {
-    body { max-width: 1100px; padding: 30px 30px 120px; }
-    .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
+    body { max-width: 1100px; padding: 30px 30px calc(120px + env(safe-area-inset-bottom, 0px)); }
+    .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px)); }
     .player-logo { width: 60px; height: 60px; }
     .player-volume { grid-area: volume; justify-self: end; width: 100%; max-width: 360px; }
     /* No PC o site e o voto ficam na coluna da estação, à direita do nome */
     .player-side { display: contents; }
-    .player-actions { grid-area: now; justify-self: end; margin-right: 6px; }
+    .player-actions { grid-area: now; justify-self: end; gap: 8px; padding-right: 0; border-right: 0; margin-right: 12px; }
     .player.has-actions .player-now { padding-right: 150px; }
     .topbar { margin-top: -30px; padding: 14px 0; }
     .brand { font-size: 22px; }

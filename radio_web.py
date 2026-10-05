@@ -680,6 +680,58 @@ def sync_active(c, restore=None):
                        for u, n, l in entries]
         write_m3u(playlist_path(name), entries)
 
+def chosen_playlist():
+    # Playlist escolhida em "Juntar a" (campo para): uma playlist guardada que não
+    # é a que está a tocar. Vazio quer dizer a lista principal (a fila)
+    name = request.values.get("para", "").strip()
+    path = playlist_path(name)
+    return name if path and os.path.isfile(path) and name != active_playlist() else ""
+
+def append_to_playlist(c, name, new_entries):
+    # Junta (url, nome, logótipo) que ainda não estão na playlist e devolve quantas
+    # entraram. Na playlist a tocar entram também na fila, num só pedido ao MPD; a
+    # que se estava a experimentar já está na fila e passa a ser da lista
+    path = playlist_path(name)
+    entries = read_m3u(path)
+    known = {u for u, _, _ in entries}
+    new = []
+    for url, title, logo in new_entries:
+        if url not in known:
+            new.append((url, title, logo))
+            known.add(url)
+    if not new:
+        return 0
+    if name == active_playlist():
+        preview = read_preview()
+        if preview and preview["url"] in known:
+            set_preview(None)
+        in_queue = {s["file"] for s in c.playlistinfo()}
+        to_add = [u for u, _, _ in new if u not in in_queue]
+        if to_add:
+            c.command_list_ok_begin()
+            for url in to_add:
+                c.add(url)
+            c.command_list_end()
+        write_m3u(path, entries + new)
+        sync_active(c)
+    else:
+        write_m3u(path, entries + new)
+    return len(new)
+
+def remove_from_playlist(c, name, urls):
+    # Na playlist a tocar sai da fila (e a sincronização reescreve o ficheiro)
+    if name == active_playlist():
+        for s in listed(c.playlistinfo()):
+            if s["file"] in urls:
+                try:
+                    c.deleteid(s["id"])
+                except CommandError:
+                    pass
+        sync_active(c)
+    else:
+        path = playlist_path(name)
+        write_m3u(path, [e for e in read_m3u(path) if e[0] not in urls])
+
 def error_page(title, message, code):
     return render_template("error.html", title=title, message=message), code
 
@@ -763,7 +815,7 @@ def queue_sig(queue):
     # de fora: experimentar uma não recarrega a página
     return hashlib.sha1(",".join(s["id"] for s in listed(queue)).encode()).hexdigest()[:12]
 
-def render_index(results=None, query="", filters=None, theme=None):
+def render_index(results=None, query="", filters=None, theme=None, view=None):
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
@@ -804,8 +856,11 @@ def render_index(results=None, query="", filters=None, theme=None):
     # A estação que falhou, pelo URL na mensagem de erro do MPD ("Failed to decode http://...")
     error = status.get("error", "")
     failed = next((s for s in stations if error and s["file"] in error), None)
+    # Para onde vão as rádios de Descobrir; o ✓ dos resultados é dessa playlist
+    para = chosen_playlist()
+    target_urls = {u for u, _, _ in read_m3u(playlist_path(para))} if para else {s["file"] for s in queue}
     return render_template("index.html", **player,
-                                  stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
+                                  stations=stations, target_urls=target_urls, para=para, view=view, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
                                   playlists=playlists,
@@ -1358,6 +1413,11 @@ def add_stream():
                 except FileNotFoundError:
                     pass
             with mpd_client() as c:
+                target = chosen_playlist()
+                if target:
+                    # Para outra playlist: só o ficheiro, a música não muda
+                    append_to_playlist(c, target, [(url, name or None, logo or None)])
+                    return back()
                 # A rádio que se estava a experimentar já está na fila: deixa de ser
                 # experiência e passa a ser da lista, no mesmo sítio
                 preview = read_preview()
@@ -1416,6 +1476,84 @@ def undo_remove():
             sync_active(c, {url: (removed.get("name"), logo if LOGO_URL_RE.match(logo or "") else None)})
             write_state(REMOVED_FILE, None)
     return back()
+
+def view_url(name, **extra):
+    return "/playlist?" + urllib.parse.urlencode({"nome": name, **extra}) + "#ver"
+
+EDIT_DONE = {"copiadas": "copiadas para", "movidas": "movidas para", "removidas": "removidas"}
+
+@app.route("/playlist")
+def view_playlist():
+    # Ver e editar uma playlist sem a pôr a tocar: as estações vêm do ficheiro
+    name = request.args.get("nome", "").strip()
+    path = playlist_path(name)
+    if path is None or not os.path.isfile(path):
+        return redirect("/#playlists")
+    info = station_info()
+    entries = []
+    for url, title, _ in read_m3u(path):
+        title = title or info.get(url, {}).get("name") or url
+        entries.append({"url": url, "name": title, "key": logo_key(url)})
+    # Mensagem depois de copiar, mover ou remover (o redirect traz o que se fez)
+    done = request.args.get("feito", "")
+    notice = None
+    if done in EDIT_DONE:
+        count = to_int(request.args.get("n"))
+        notice = f"✓ {count} {'estação' if count == 1 else 'estações'} {EDIT_DONE[done]}"
+        if done != "removidas":
+            notice += f" «{request.args.get('destino', '')}»"
+            skipped = to_int(request.args.get("ja"))
+            if skipped:
+                notice += f" ({skipped} já lá {'estava' if skipped == 1 else 'estavam'})"
+        notice += "."
+    return render_index(view={"name": name, "entries": entries, "notice": notice,
+                              "playing": name == active_playlist()})
+
+@app.route("/playlist_edit", methods=["POST"])
+def edit_playlist():
+    # Copiar, mover ou remover as estações escolhidas de uma playlist, esteja ou não a tocar
+    name = request.form.get("nome", "").strip()
+    path = playlist_path(name)
+    if path is None or not os.path.isfile(path):
+        return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
+    action = request.form.get("acao", "")
+    urls = {u for u in request.form.getlist("url") if safe_url(u)}
+    with QUEUE_LOCK, mpd_client() as c:
+        picked = [e for e in read_m3u(path) if e[0] in urls]
+        if not picked or action not in ("copiar", "mover", "remover"):
+            return redirect(view_url(name))
+        extra = {"n": len(picked)}
+        if action in ("copiar", "mover"):
+            dest = request.form.get("destino", "").strip()
+            dest_path = playlist_path(dest)
+            if dest_path is None or not os.path.isfile(dest_path) or dest == name:
+                return error_page("Playlist inexistente", "Escolhe outra playlist para onde copiar ou mover.", 400)
+            added = append_to_playlist(c, dest, picked)
+            extra.update(destino=dest, ja=len(picked) - added)
+        if action in ("mover", "remover"):
+            remove_from_playlist(c, name, urls)
+    extra["feito"] = {"copiar": "copiadas", "mover": "movidas", "remover": "removidas"}[action]
+    return redirect(view_url(name, **extra))
+
+@app.route("/rename_playlist", methods=["POST"])
+def rename_playlist():
+    name = request.form.get("nome", "").strip()
+    new = request.form.get("novo", "").strip()
+    path, new_path = playlist_path(name), playlist_path(new)
+    if path is None or not os.path.isfile(path):
+        return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
+    if new_path is None:
+        return error_page(*BAD_NAME)
+    if new == name:
+        return redirect(view_url(name))
+    with QUEUE_LOCK:
+        if os.path.exists(new_path):
+            return error_page("Playlist existente", f"Já existe uma playlist «{new}». Escolhe outro nome.", 400)
+        was_active = name == active_playlist()
+        os.rename(path, new_path)
+        if was_active:
+            set_active(new)
+    return redirect(view_url(new))
 
 @app.route("/load_playlist", methods=["POST"])
 def load_playlist():

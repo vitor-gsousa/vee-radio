@@ -47,9 +47,11 @@
         });
         if (target && target.classList.contains("modal")) {
             target.classList.add("open");
-        } else if (location.pathname === "/search" || location.pathname === "/tema") {
-            // Fechou-se a janela da pesquisa ou do tema: o URL volta a ser o da lista,
-            // para as atualizações da página não voltarem a pedir tudo à API
+        } else if (location.pathname === "/search" || location.pathname === "/tema" ||
+                   location.pathname === "/playlist" || new URLSearchParams(location.search).has("para")) {
+            // Fechou-se a janela da pesquisa, do tema ou de uma playlist: o URL volta a
+            // ser o da lista, para as atualizações da página não voltarem a pedir tudo à
+            // API, e "Juntar a" volta à playlist a tocar
             history.replaceState(null, "", listUrl() + location.hash);
             currentPath = location.pathname + location.search;
         }
@@ -426,11 +428,19 @@
                 var same = m.querySelector('.filters select[name="' + CSS.escape(t.name) + '"]');
                 if (same && same !== t) same.value = t.value;
             });
-            saveFilter(t.name, t.value);
+            // A playlist de "Juntar a" não fica lembrada: ao voltar, é a que está a tocar
+            if (t.name !== "para") saveFilter(t.name, t.value);
         }
         if (t.form.matches(".refine")) return t.form.requestSubmit();
         var query = t.form.querySelector('input[name="q"]');
-        if (query && query.value.trim()) t.form.requestSubmit();
+        if (query && query.value.trim()) return t.form.requestSubmit();
+        // Mudou "Juntar a" sem pesquisa: a página volta com os textos e o ✓ dessa playlist
+        if (t.name === "para") {
+            var url = new URL(location.href);
+            if (t.value) url.searchParams.set("para", t.value);
+            else url.searchParams.delete("para");
+            load(url.pathname + url.search + url.hash, false);
+        }
     });
 
     document.addEventListener("submit", function (e) {

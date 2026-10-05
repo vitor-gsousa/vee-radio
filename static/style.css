@@ -15,6 +15,7 @@ button:hover, .btn:hover { background: #45475a; }
 .row > :first-child { flex: 1; min-width: 0; }
 .row button, .row .btn { margin: 0; }
 .row > .btn { flex: 1; }
+.row > .small { flex: none; }
 .small { width: auto; padding: 12px 14px; }
 .del { background: #f38ba8; color: #11111b; font-size: 12px; }
 .station { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -108,6 +109,28 @@ select { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; bord
 .filters select { min-width: 0; padding: 10px 6px; font-size: 15px; text-overflow: ellipsis; }
 .refine button { margin: 0 0 6px; padding: 10px; font-size: 14px; }
 .theme-add label { display: block; margin: 8px 0 0 4px; }
+/* "Juntar a": a playlist para onde vai o + dos resultados, por cima dos filtros */
+.target-field { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; font-size: 14px; color: #a6adc8; }
+.target-field span { flex: none; padding-left: 4px; }
+.target-field select { flex: 1; }
+
+/* Ver e editar uma playlist sem a pôr a tocar (#ver) */
+.view-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.view-actions form { margin: 0; flex: 1; }
+.view-actions button, .view-actions .btn { margin: 0; }
+.view-actions .btn { flex: 1; }
+.view-row { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
+.view-row input[type="checkbox"] { flex: none; width: 20px; height: 20px; margin: 0 0 0 4px; }
+.view-row label { flex: 1; min-width: 0; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.view-row label span { overflow-wrap: anywhere; }
+.view-row .thumb { margin-top: 0; }
+.view-row .result-play { margin: 0; }
+.view-edit { margin-top: 10px; }
+.view-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.view-buttons button { flex: 1; margin: 0; padding: 10px; font-size: 14px; }
+.view-rename { display: flex; gap: 6px; align-items: center; }
+.view-rename input { flex: 1; min-width: 0; }
+.view-rename button { width: auto; margin: 0; padding: 10px 14px; font-size: 14px; }
 .check { display: flex; align-items: center; gap: 8px; margin: 12px 0 2px 4px; }
 .check input { width: 18px; height: 18px; margin: 0; }
 label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }

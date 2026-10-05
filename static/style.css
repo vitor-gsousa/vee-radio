@@ -121,9 +121,12 @@ label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
 }
 
 /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
-.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "volume volume"; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #11111b; border-top: 1px solid #313244; text-align: left; }
+.player { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "now controls" "side side"; gap: 6px 10px; align-items: center; padding: 10px 12px; background: #11111b; border-top: 1px solid #313244; text-align: left; }
 .player form { margin: 0; }
 .player-now { grid-area: now; display: flex; gap: 10px; align-items: center; min-width: 0; }
+/* Logótipo e nome: tocar leva ao cartão da estação na lista */
+.player-go { display: flex; gap: 10px; align-items: center; min-width: 0; color: inherit; text-decoration: none; }
+a.player-go:hover .player-station { text-decoration: underline; }
 .player-logo { width: 52px; height: 52px; flex: none; border-radius: 8px; object-fit: contain; background: #fff; }
 .player-logo.empty { background: #313244; display: flex; align-items: center; justify-content: center; font-size: 24px; }
 .player-info { min-width: 0; }
@@ -133,7 +136,6 @@ label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
 /* Qualidade e géneros por baixo da faixa; no telemóvel fica só a qualidade */
 .player-detail { font-size: 12px; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-detail span + span::before { content: " · "; }
-.player-tag { display: none; }
 .player-trying { color: #f9e2af; }
 /* "+ Juntar" da rádio que se está a experimentar */
 .player-keep { flex: none; margin-left: auto; }
@@ -146,9 +148,12 @@ a.icon { display: block; box-sizing: border-box; }
 .vote:hover { color: #f38ba8; }
 .vote.voted, .vote.voted:disabled { color: #f38ba8; opacity: 1; }
 .icon.vote.voted svg { fill: currentColor; }
-.vote-count { display: none; font-size: 12px; }
+.vote-count { font-size: 12px; white-space: nowrap; }
 .player-controls { grid-area: controls; display: flex; gap: 4px; align-items: center; }
-.player-volume { grid-area: volume; display: flex; gap: 8px; align-items: center; }
+/* Segunda linha no telemóvel: o site e o voto por baixo da estação, separados do volume */
+.player-side { grid-area: side; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.player-actions { flex: none; display: flex; gap: 4px; align-items: center; padding-right: 8px; border-right: 1px solid #313244; }
+.player-volume { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: center; }
 .icon { width: 40px; height: 40px; padding: 8px; margin: 0; border-radius: 20px; background: transparent; color: #cdd6f4; }
 .icon svg { display: block; width: 100%; height: 100%; fill: currentColor; }
 .icon:hover { background: #313244; }
@@ -187,6 +192,10 @@ body.busy { cursor: progress; }
 body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; height: 3px; width: 40%; background: #89b4fa; animation: busy 1s ease-in-out infinite; }
 @keyframes busy { from { transform: translateX(-100%); } to { transform: translateX(250vw); } }
 .tile.pending .tile-play { opacity: 0.6; }
+/* Vindo do reprodutor: o cartão fica visível por baixo da barra de topo e acende-se um instante */
+.tile { scroll-margin: 90px 0 160px; }
+.tile.flash .tile-play { animation: flash 1.2s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 8px #89b4fa; } to { box-shadow: 0 0 0 0 transparent; } }
 .toast.ok { background: #a6e3a1; }
 .toast { position: fixed; left: 50%; bottom: 140px; z-index: 30; transform: translateX(-50%); max-width: 90%; padding: 10px 16px; border-radius: 8px; background: #f38ba8; color: #11111b; font-weight: bold; font-size: 14px; }
 
@@ -195,9 +204,11 @@ body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; 
     body { max-width: 1100px; padding: 30px 30px 120px; }
     .player { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-areas: "now controls volume"; padding: 12px 20px; }
     .player-logo { width: 60px; height: 60px; }
-    .player-volume { justify-self: end; width: 100%; max-width: 360px; }
-    .player-tag { display: inline; }
-    .vote-count { display: inline; }
+    .player-volume { grid-area: volume; justify-self: end; width: 100%; max-width: 360px; }
+    /* No PC o site e o voto ficam na coluna da estação, à direita do nome */
+    .player-side { display: contents; }
+    .player-actions { grid-area: now; justify-self: end; margin-right: 6px; }
+    .player.has-actions .player-now { padding-right: 150px; }
     .topbar { margin-top: -30px; padding: 14px 0; }
     .brand { font-size: 22px; }
     .nav-actions .btn { padding: 10px 16px; font-size: 15px; }

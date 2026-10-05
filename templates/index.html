@@ -137,7 +137,7 @@
         </div>
         <div class="stations">
         {% for s in stations %}
-            <div class="tile{% if s.current %} current{% endif %}" data-id="{{ s.id }}" data-plain="{{ s.plain }}"{% if s.hidden %} hidden{% endif %}>
+            <div class="tile{% if s.current %} current{% endif %}" id="e{{ s.id }}" data-id="{{ s.id }}" data-plain="{{ s.plain }}"{% if s.hidden %} hidden{% endif %}>
                 <form action="/play_id/{{ s.id }}" method="post">
                     <input type="hidden" name="next" value="{{ list_url }}">
                     <button class="tile-play" title="Tocar {{ s.name }}">

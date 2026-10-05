@@ -736,6 +736,8 @@ def player_context(status, current, info):
             "current_title": clean_title(current.get("title", "")),
             "current_key": logo_key(current["file"]) if current.get("file") else "",
             "current_id": current.get("id") if playing else None,
+            # Cartão da estação atual, mesmo parada; a que se experimenta não tem
+            "tile_id": current.get("id") if current.get("file") and not preview else None,
             "preview": preview, "active": active_playlist(),
             "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
 
@@ -745,7 +747,7 @@ def with_sig(player):
     d = player["details"]
     parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
              player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
-             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"]]
+             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"], player["tile_id"]]
     player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
     return player
 

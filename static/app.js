@@ -343,6 +343,22 @@
         input.focus();
     });
 
+    // Tocar na estação do reprodutor: desliza até ao cartão e acende-o, sem
+    // deixar #e<id> no URL (sem script, o link salta para o cartão)
+    document.addEventListener("click", function (e) {
+        var go = e.target.closest("a.player-go");
+        var tile = go && document.getElementById(go.getAttribute("href").slice(1));
+        if (!tile) return;
+        e.preventDefault();
+        if (tile.hidden) return toast("A estação a tocar está escondida pelo filtro da lista.");
+        var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        tile.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+        tile.classList.remove("flash");
+        void tile.offsetWidth;
+        tile.classList.add("flash");
+        setTimeout(function () { tile.classList.remove("flash"); }, 1300);
+    });
+
     document.addEventListener("input", function (e) {
         var t = e.target;
         var clear = t.parentNode && t.parentNode.querySelector(".search-clear");

@@ -41,8 +41,8 @@
     </div>
 {% endmacro %}
 {% macro detail_line() %}
-    {% if current_key and (preview or kbps or details.tags) %}
-    <span class="player-detail">{% if preview %}<span class="trying">A experimentar</span>{% endif %}{% if kbps %}<span>{{ kbps }} kbps</span>{% endif %}{% for tag in details.tags %}<span class="player-tag">{{ tag }}</span>{% endfor %}</span>
+    {% if current_key and (preview or kbps or details.tags or versions) %}
+    <span class="player-detail">{% if preview %}<span class="trying">A experimentar</span>{% endif %}{% if versions %}<span class="q-pill" title="Há outras versões desta rádio">{{ kbps ~ " kbps" if kbps else "Qualidade" }}{{ icon("caret-down") }}</span>{% elif kbps %}<span>{{ kbps }} kbps</span>{% endif %}{% for tag in details.tags %}<span class="player-tag">{{ tag }}</span>{% endfor %}</span>
     {% endif %}
 {% endmacro %}
 {# Rádio a experimentar (▶ nos resultados): ainda não está na lista #}
@@ -89,6 +89,21 @@
                 </div>
                 <div class="sheet-actions">{{ station_actions() }}</div>
             </div>
+            {# Outras versões da mesma rádio: trocar fica guardado na playlist, no mesmo sítio #}
+            {% if versions %}
+            <div class="versions-pick">
+                <span class="field">Qualidade</span>
+                <div class="pill-row">
+                    {% for v in versions %}
+                    {% if v.current %}
+                    <span class="pill on" aria-current="true">{{ icon("check") }}{{ v.label }}</span>
+                    {% else %}
+                    <form action="/versao" method="post"><input type="hidden" name="url" value="{{ v.url }}"><button class="pill">{{ v.label }}</button></form>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
             {{ keep_form() }}
             {{ controls(big=True) }}
             {{ volume_bar() }}

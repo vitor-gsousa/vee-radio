@@ -785,8 +785,14 @@ def player_context(status, current, info):
     station = ""
     if current.get("file"):
         station = info.get(current["file"], {}).get("name") or (preview or {}).get("name") or display_name(current)
+    # Outras versões da rádio (para escolher no reprodutor aberto)
+    versions = []
+    if current.get("file"):
+        alts = station_versions(current["file"], station, details.get("countrycode"))
+        if len(alts) > 1:
+            versions = [{**v, "current": v["url"] == current["file"]} for v in alts]
     return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
-            "details": details, "kbps": kbps,
+            "details": details, "kbps": kbps, "versions": versions,
             "voted": time.time() - (details.get("voted_at") or 0) < VOTE_COOLDOWN,
             "current_station": station,
             "current_title": clean_title(current.get("title", "")),
@@ -803,7 +809,8 @@ def with_sig(player):
     d = player["details"]
     parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
              player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
-             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"], player["tile_id"]]
+             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"], player["tile_id"],
+             ",".join(v["url"] for v in player["versions"])]
     player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
     return player
 
@@ -824,6 +831,8 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
     # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
         status = c.status()
+        if try_other_version(c, status):
+            status = c.status()
         current = c.currentsong()
         queue = listed(c.playlistinfo())
         stored_playlists = sorted(p['playlist'] for p in c.listplaylists())
@@ -1014,6 +1023,10 @@ def estado(notice=None):
     # O notice é uma mensagem curta para o script mostrar (por exemplo, depois de votar)
     with mpd_client() as c:
         status = c.status()
+        switched = try_other_version(c, status)
+        if switched:
+            status = c.status()
+            notice = notice or switched
         current = c.currentsong()
         queue = c.playlistinfo()
     player = with_sig(player_context(status, current, station_info()))
@@ -1195,12 +1208,20 @@ def search_stations(filters, limit, **criteria):
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
     with urllib.request.urlopen(req, timeout=10) as r:
         stations = json.load(r)
+    if not isinstance(stations, list):
+        raise ValueError("resposta inesperada do radio-browser")
+    results = group_versions(clean_stations(stations))
+    if filters["ordem"] == "name":
+        # A API ordena os nomes tal como estão, com espaços e pontuação à frente
+        # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas
+        results.sort(key=lambda s: sort_key(s["name"]))
+    return results[:limit]
+
+def clean_stations(stations):
     # A mesma rádio aparece muitas vezes repetida com o mesmo URL. Os streams HLS
     # (.m3u8) ficam de fora porque o MPD nem sempre os consegue tocar; quase todas
     # as rádios têm também um stream normal.
     seen, results = set(), []
-    if not isinstance(stations, list):
-        raise ValueError("resposta inesperada do radio-browser")
     for s in stations:
         # Os campos podem vir a null: sem URL a rádio fica de fora, o resto fica vazio
         if not isinstance(s, dict):
@@ -1215,12 +1236,148 @@ def search_stations(filters, limit, **criteria):
         s["name"] = " ".join(str(s.get("name") or "").split())
         s["tags"] = str(s.get("tags") or "")
         s["stationuuid"] = s.get("stationuuid") or ""
+        s["codec"] = str(s.get("codec") or "")
+        s["bitrate"] = to_int(s.get("bitrate"))
+        s["countrycode"] = str(s.get("countrycode") or "").upper()
         results.append(s)
-    if filters["ordem"] == "name":
-        # A API ordena os nomes tal como estão, com espaços e pontuação à frente
-        # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas
-        results.sort(key=lambda s: sort_key(s["name"]))
-    return results[:limit]
+    return results
+
+# Versões da mesma rádio: no radio-browser a mesma rádio aparece várias vezes, com
+# streams diferentes (MP3 128, AAC 64...). Os resultados mostram uma linha por rádio,
+# com a melhor versão à frente, e as outras ficam guardadas para trocar no reprodutor
+# e para tentar outra quando uma não toca. A mesma rádio é o mesmo nome (sem
+# acentos nem marcas de qualidade como "128k" ou "AAC") no mesmo país: "Radio 1"
+# de países diferentes não se juntam
+QUALITY_WORDS_RE = re.compile(r"\b(\d{2,3}\s*k(bps|b)?|aac\+?|he-?aac|mp3|ogg|opus|flac|hq|lq|hd)\b", re.I)
+# Quanto rende cada kbps: um AAC a 64 soa como um MP3 a 128
+CODEC_FACTOR = {"MP3": 1.0, "AAC": 1.6, "AAC+": 1.8, "HE-AAC": 1.8, "OGG": 1.3, "OPUS": 1.9, "FLAC": 4.0}
+VERSION_LABELS = {"AAC+": "AAC+", "HE-AAC": "AAC+"}
+
+def group_key(name, country):
+    text = QUALITY_WORDS_RE.sub(" ", plain_text(name or ""))
+    return " ".join(re.sub(r"[^\w]+", " ", text).split()), (country or "").upper()
+
+def quality(station):
+    # Bitrate desconhecido conta como 64; os cliques só desempatam
+    codec = str(station.get("codec") or "").upper()
+    kbps = to_int(station.get("bitrate")) or 64
+    return (kbps * CODEC_FACTOR.get(codec, 1.0), to_int(station.get("clickcount")))
+
+def version_label(v):
+    codec = str(v.get("codec") or "").upper()
+    codec = VERSION_LABELS.get(codec, codec) or "?"
+    return f"{codec} · {v['bitrate']} kbps" if v.get("bitrate") else codec
+
+def group_versions(stations):
+    # Uma entrada por rádio (a melhor versão, pela ordem da primeira que aparece),
+    # com todas as versões em "variants", da melhor para a pior
+    groups, order = {}, []
+    for st in stations:
+        key = group_key(st["name"], st.get("countrycode"))
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(st)
+    results = []
+    for key in order:
+        members = sorted(groups[key], key=quality, reverse=True)
+        best = dict(members[0])
+        # O nome é o da primeira que aparece (a mais ouvida, com a ordenação por
+        # omissão), que costuma ser o nome limpo, sem "AAC" nem "128k"
+        best["name"] = groups[key][0]["name"]
+        if not best["favicon"]:
+            best["favicon"] = next((m["favicon"] for m in members if m["favicon"]), "")
+        best["variants"] = [{"url": m["url_resolved"], "codec": m["codec"], "bitrate": m["bitrate"],
+                             "uuid": m["stationuuid"], "label": version_label(m)} for m in members]
+        results.append(best)
+    return results
+
+# Versões conhecidas de cada stream: URL -> {"t", "alts": [{url, codec, bitrate, uuid, label}]},
+# com a mesma lista em todos os URLs da rádio. Vêm dos resultados da pesquisa (ao
+# juntar ou ouvir) ou, para as rádios já guardadas, de uma procura em segundo plano
+VERSIONS_FILE = os.path.expanduser("~/.cache/vee-radio/versoes.json")
+VERSIONS_MAX_AGE = 7 * 24 * 3600
+VERSIONS_LOCK = threading.Lock()
+_versions_cache = {"key": None, "data": {}}
+
+def load_versions():
+    # Partilhado: só para ler
+    key = file_sig(VERSIONS_FILE)
+    if _versions_cache["key"] != key:
+        try:
+            with open(VERSIONS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, ValueError):
+            data = {}
+        _versions_cache.update(key=key, data=data if isinstance(data, dict) else {})
+    return _versions_cache["data"]
+
+def save_versions(alts):
+    # Guarda a lista em todos os URLs da rádio; as entradas de URLs que já não
+    # estão em nenhuma playlist saem ao fim de um mês, como os números
+    now = time.time()
+    with VERSIONS_LOCK:
+        try:
+            with open(VERSIONS_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+        except (FileNotFoundError, ValueError):
+            data = {}
+        known = station_info()
+        data = {u: e for u, e in data.items() if u in known or now - e.get("t", 0) < STATS_KEEP_SECONDS}
+        for v in alts:
+            data[v["url"]] = {"t": now, "alts": alts}
+        os.makedirs(os.path.dirname(VERSIONS_FILE), exist_ok=True)
+        tmp = VERSIONS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, VERSIONS_FILE)
+
+def remember_versions(urls):
+    # Ao juntar ou ouvir a partir dos resultados: as versões estão na pesquisa em memória
+    urls = set(urls)
+    with _search_lock:
+        cached = [r for _, results in _search_cache.values() for r in results]
+    for r in cached:
+        alts = r.get("variants") or []
+        if len(alts) > 1 and urls & {v["url"] for v in alts}:
+            save_versions(alts)
+            urls -= {v["url"] for v in alts}
+
+_versions_refreshing = set()
+
+def station_versions(url, name, country):
+    # Versões da rádio deste stream, só do que está guardado: o /estado não pode
+    # esperar pela API. Se faltarem ou estiverem velhas, procura-as em segundo plano
+    entry = load_versions().get(url)
+    if entry and time.time() - entry.get("t", 0) < VERSIONS_MAX_AGE:
+        return entry["alts"]
+    if name and country:
+        with _refreshing_lock:
+            fresh = url not in _versions_refreshing
+            _versions_refreshing.add(url)
+        if fresh:
+            threading.Thread(target=lookup_versions, args=(url, name, country), daemon=True).start()
+    return entry["alts"] if entry else []
+
+def lookup_versions(url, name, country):
+    try:
+        # Procura pelo nome como está (com acentos), só sem as marcas de qualidade
+        query = " ".join(QUALITY_WORDS_RE.sub(" ", name).split()) or name
+        found = clean_stations(api_stations("/json/stations/search", name=query, countrycode=country,
+                                            hidebroken="true", limit=40))
+        key = group_key(name, country)
+        same = [st for st in found if group_key(st["name"], st["countrycode"]) == key]
+        if url not in {st["url_resolved"] for st in same}:
+            # O stream guardado não está no radio-browser (ou mudou): fica só ele
+            same = []
+        group = group_versions(same)
+        alts = group[0]["variants"] if group else [{"url": url, "codec": "", "bitrate": 0, "uuid": "", "label": "?"}]
+        save_versions(alts)
+    except (OSError, ValueError):
+        pass
+    finally:
+        with _refreshing_lock:
+            _versions_refreshing.discard(url)
 
 def plain_text(text):
     # Sem acentos nem maiúsculas, para comparar e ordenar nomes. Tem de dar o mesmo
@@ -1278,6 +1435,7 @@ def add_theme():
     logos = [l if LOGO_URL_RE.match(l) else None for l in request.form.getlist("logo")]
     picked = list(zip(request.form.getlist("url"), request.form.getlist("name"), logos))
     remember_uuids(zip(request.form.getlist("url"), request.form.getlist("uuid")))
+    remember_versions(request.form.getlist("url"))
     with QUEUE_LOCK, mpd_client() as c:
         existed = os.path.isfile(path)
         entries = read_m3u(path)
@@ -1348,6 +1506,70 @@ def next_station():
         step(c, +1)
     return done()
 
+def replace_stream(c, song, new_url):
+    # Troca o stream de uma entrada da fila por outra versão da mesma rádio, no mesmo
+    # sítio, e toca-a. Nome e logótipo ficam os da estação (o URL novo ainda não
+    # está em nenhum .m3u); a que se estava a experimentar continua experiência
+    old = song["file"]
+    known = station_info().get(old, {})
+    preview = read_preview()
+    new_id = c.addid(new_url, int(song["pos"]))
+    c.playid(new_id)
+    c.deleteid(song["id"])
+    if preview and preview["url"] == old:
+        set_preview({**preview, "url": new_url})
+    else:
+        sync_active(c, {new_url: (known.get("name") or song.get("name"), known.get("logo"))})
+
+@app.route("/versao", methods=["POST"])
+def change_version():
+    # Outra versão (bitrate, codec) da estação a tocar, escolhida no reprodutor
+    url = request.form.get("url", "").strip()
+    with QUEUE_LOCK, mpd_client() as c:
+        song = c.currentsong()
+        alts = load_versions().get(song.get("file"), {}).get("alts", [])
+        version = next((v for v in alts if v["url"] == url), None)
+        if not version or not safe_url(url):
+            return error_page("Versão desconhecida", "Essa versão não é desta rádio.", 400)
+        if url != song["file"]:
+            remember_uuids([(url, version.get("uuid", ""))])
+            replace_stream(c, song, url)
+    return done()
+
+# Versões já tentadas por rádio (URL que falhou -> {URLs tentados}), para não andar
+# às voltas: se nenhuma tocar fica o aviso. Esquecem-se ao fim de 10 minutos
+FALLBACK_SECONDS = 600
+_fallback = {}
+
+def try_other_version(c, status):
+    # Uma rádio não tocou e há outra versão dela por tentar: troca e toca. Devolve
+    # a mensagem para mostrar, ou None. Corre no /estado e nas páginas, por quem
+    # chegar primeiro; os outros pedidos não esperam pelo lock
+    error = status.get("error", "")
+    if not error or not QUEUE_LOCK.acquire(blocking=False):
+        return None
+    try:
+        song = next((s for s in c.playlistinfo() if s["file"] in error), None)
+        if not song:
+            return None
+        alts = load_versions().get(song["file"], {}).get("alts", [])
+        group = tuple(sorted(v["url"] for v in alts))
+        now = time.time()
+        for key in [k for k, (t, _) in _fallback.items() if now - t > FALLBACK_SECONDS]:
+            del _fallback[key]
+        tried = _fallback.setdefault(group, (now, set()))[1]
+        tried.add(song["file"])
+        nxt = next((v for v in alts if v["url"] not in tried), None)
+        if not nxt:
+            return None
+        tried.add(nxt["url"])
+        name = station_info().get(song["file"], {}).get("name") or song.get("name") or ""
+        remember_uuids([(nxt["url"], nxt.get("uuid", ""))])
+        replace_stream(c, song, nxt["url"])
+        return {"ok": True, "text": f"«{name}» não tocou nessa versão: a tocar em {nxt['label']}."}
+    finally:
+        QUEUE_LOCK.release()
+
 @app.route("/ouvir", methods=["POST"])
 def listen():
     # Toca uma rádio dos resultados sem a juntar à lista. Fica no fim da fila até
@@ -1358,6 +1580,7 @@ def listen():
     if not safe_url(url):
         return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://.", 400)
     remember_uuids([(url, request.form.get("uuid", ""))])
+    remember_versions([url])
     with QUEUE_LOCK, mpd_client() as c:
         song = next((s for s in c.playlistinfo() if s["file"] == url), None)
         if song:
@@ -1431,6 +1654,7 @@ def add_stream():
                           "não pode ter quebras de linha e tem de ter menos de 2048 caracteres.", 400)
     if url:
         remember_uuids([(url, request.form.get("uuid", ""))])
+        remember_versions([url])
         with QUEUE_LOCK:
             # O nome vai para o ficheiro antes de sincronizar, para a playlist ficar com ele.
             # Só se escreve se mudar alguma coisa: o ficheiro é lido a cada pedido e

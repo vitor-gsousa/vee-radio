@@ -51,8 +51,35 @@
             <p class="hint">{{ icon("play-fill") }} experimenta sem juntar · {{ icon("plus") }} junta {% if para %}a «{{ para }}» (a música não muda){% elif active %}a «{{ active }}»{% else %}à lista (que não está guardada){% endif %}</p>
 {% endmacro %}
 
-{# Uma rádio nos resultados: ▶ experimenta sem juntar, + junta à playlist escolhida #}
+{# ▶ (experimenta sem juntar) e + (junta à playlist escolhida, ou ✓ se já lá está) de um stream #}
+{% macro station_buttons(url, name, favicon, uuid, back_to, label=None) %}
+                <form action="/ouvir" method="post">
+                    <input type="hidden" name="url" value="{{ url }}">
+                    <input type="hidden" name="name" value="{{ name }}">
+                    <input type="hidden" name="logo" value="{{ favicon }}">
+                    <input type="hidden" name="uuid" value="{{ uuid }}">
+                    <input type="hidden" name="next" value="{{ back_to }}">
+                    <button class="icon-btn" title="Ouvir sem juntar" aria-label="Ouvir {{ name }}{% if label %} ({{ label }}){% endif %} sem juntar">{{ icon("play-fill") }}</button>
+                </form>
+                {% if url in target_urls %}
+                <span class="icon-btn done" title="Já está {% if para %}em «{{ para }}»{% else %}na lista{% endif %}" aria-label="Já está na lista">{{ icon("check-circle") }}</span>
+                {% else %}
+                <form action="/add_stream" method="post">
+                    <input type="hidden" name="url" value="{{ url }}">
+                    <input type="hidden" name="name" value="{{ name }}">
+                    <input type="hidden" name="logo" value="{{ favicon }}">
+                    <input type="hidden" name="uuid" value="{{ uuid }}">
+                    <input type="hidden" name="next" value="{{ back_to }}">
+                    {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
+                    <button class="icon-btn add" title="Juntar{% if para or active %} a «{{ para or active }}»{% endif %}" aria-label="Juntar {{ name }}{% if label %} ({{ label }}){% endif %}">{{ icon("plus") }}</button>
+                </form>
+                {% endif %}
+{% endmacro %}
+
+{# Uma rádio nos resultados, com a melhor versão à frente. Se o radio-browser a tem
+   em várias versões (MP3 128, AAC 64...), o pill "N versões" mostra as outras #}
 {% macro result_row(r, back_to, tags=False) %}
+            <div class="result">
             <div class="row-item">
                 {# O favicon vem direto do radio-browser e só carrega quando aparece no ecrã #}
                 {% if r.favicon %}<img class="thumb" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="thumb empty">{{ icon("radio") }}</span>{% endif %}
@@ -60,27 +87,19 @@
                     <div class="row-title">{{ r.name }}</div>
                     <div class="row-meta">{{ r.countrycode|flag }} {{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if tags and r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
                 </div>
-                <form action="/ouvir" method="post">
-                    <input type="hidden" name="url" value="{{ r.url_resolved }}">
-                    <input type="hidden" name="name" value="{{ r.name }}">
-                    <input type="hidden" name="logo" value="{{ r.favicon }}">
-                    <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
-                    <input type="hidden" name="next" value="{{ back_to }}">
-                    <button class="icon-btn" title="Ouvir sem juntar" aria-label="Ouvir {{ r.name }} sem juntar">{{ icon("play-fill") }}</button>
-                </form>
-                {% if r.url_resolved in target_urls %}
-                <span class="icon-btn done" title="Já está {% if para %}em «{{ para }}»{% else %}na lista{% endif %}" aria-label="Já está na lista">{{ icon("check-circle") }}</span>
-                {% else %}
-                <form action="/add_stream" method="post">
-                    <input type="hidden" name="url" value="{{ r.url_resolved }}">
-                    <input type="hidden" name="name" value="{{ r.name }}">
-                    <input type="hidden" name="logo" value="{{ r.favicon }}">
-                    <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
-                    <input type="hidden" name="next" value="{{ back_to }}">
-                    {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
-                    <button class="icon-btn add" title="Juntar{% if para or active %} a «{{ para or active }}»{% endif %}" aria-label="Juntar {{ r.name }}">{{ icon("plus") }}</button>
-                </form>
-                {% endif %}
+                {{ station_buttons(r.url_resolved, r.name, r.favicon, r.stationuuid, back_to) }}
+            </div>
+            {% if r.variants and r.variants|length > 1 %}
+            <details class="versions">
+                <summary>{{ icon("sliders-horizontal") }}<span>{{ r.variants|length }} versões</span>{{ icon("caret-down", "summary-caret") }}</summary>
+                {% for v in r.variants %}
+                <div class="version-row">
+                    <span class="version-label">{{ v.label }}{% if loop.first %} <span class="best">melhor</span>{% endif %}</span>
+                    {{ station_buttons(v.url, r.name, r.favicon, v.uuid, back_to, v.label) }}
+                </div>
+                {% endfor %}
+            </details>
+            {% endif %}
             </div>
 {% endmacro %}
 

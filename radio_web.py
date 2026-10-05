@@ -144,7 +144,7 @@ BITRATES = [64, 128, 192]
 # Quantas rádios de um tema se mostram e se juntam de uma vez (as mais ouvidas)
 THEME_LIMIT = 15
 
-STREAM_FAILED_HINT ='O endereço pode ter mudado. Procura a rádio outra vez em "Juntar rádio" e remove a antiga.'
+STREAM_FAILED_HINT ='O endereço pode ter mudado. Procura a rádio outra vez em "Descobrir" e remove a antiga.'
 
 STATES = {"play": "A tocar", "pause": "Em pausa", "stop": "Parado"}
 
@@ -582,11 +582,58 @@ def set_active(name):
     elif os.path.exists(ACTIVE_FILE):
         os.remove(ACTIVE_FILE)
 
+# Rádio a experimentar ("▶" nos resultados): está na fila do MPD, porque o MPD só
+# toca o que lá está, mas não conta como estação da lista nem vai para a playlist.
+# Fica num ficheiro e não em memória: depois de reiniciar a app, a sincronização
+# seguinte guardava-a na playlist
+PREVIEW_FILE = os.path.expanduser("~/.config/vee-radio/a-ouvir.json")
+
+def read_preview():
+    # {"url", "name", "logo"} ou None
+    try:
+        with open(PREVIEW_FILE, encoding="utf-8") as f:
+            preview = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return None
+    return preview if isinstance(preview, dict) and safe_url(preview.get("url") or "") else None
+
+def set_preview(entry):
+    if entry:
+        os.makedirs(os.path.dirname(PREVIEW_FILE), exist_ok=True)
+        tmp = PREVIEW_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(entry, f)
+        os.replace(tmp, PREVIEW_FILE)
+    elif os.path.exists(PREVIEW_FILE):
+        os.remove(PREVIEW_FILE)
+
+def preview_song(queue):
+    # A entrada da fila que está a ser experimentada, ou None
+    preview = read_preview()
+    return next((s for s in queue if s["file"] == preview["url"]), None) if preview else None
+
+def drop_preview(c, keep_url=None):
+    # Tocou-se outra estação: a que se estava a experimentar sai da fila
+    preview = read_preview()
+    if not preview or preview["url"] == keep_url:
+        return
+    song = preview_song(c.playlistinfo())
+    if song:
+        try:
+            c.deleteid(song["id"])
+        except CommandError:
+            pass
+    set_preview(None)
+
 def queue_entries(c):
     # O save do MPD só escreve os URLs, por isso as playlists são escritas aqui para manter os nomes
     info = station_info()
     entries = []
-    for s in c.playlistinfo():
+    queue = c.playlistinfo()
+    trying = preview_song(queue)
+    for s in queue:
+        if s is trying:
+            continue
         known = info.get(s["file"], {})
         entries.append((s["file"], known.get("name") or s.get("name"), known.get("logo")))
     return entries
@@ -638,13 +685,21 @@ def player_context(status, current, info):
     # O bitrate do MPD é o real, enquanto toca; o da API é o anunciado pela rádio
     live = status.get("bitrate")
     kbps = int(live) if playing and live and live.isdigit() and live != "0" else details.get("bitrate") or 0
+    # A experimentar: o nome vem dos resultados, porque ainda não está em nenhum .m3u
+    preview = read_preview()
+    if not (preview and current.get("file") == preview["url"]):
+        preview = None
+    station = ""
+    if current.get("file"):
+        station = info.get(current["file"], {}).get("name") or (preview or {}).get("name") or display_name(current)
     return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
             "details": details, "kbps": kbps,
             "voted": time.time() - (details.get("voted_at") or 0) < VOTE_COOLDOWN,
-            "current_station": display_name(current) if current.get("file") else "",
+            "current_station": station,
             "current_title": clean_title(current.get("title", "")),
             "current_key": logo_key(current["file"]) if current.get("file") else "",
-            "current_pos": current.get("pos") if playing else None,
+            "current_id": current.get("id") if playing else None,
+            "preview": preview, "active": active_playlist(),
             "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
 
 def with_sig(player):
@@ -653,21 +708,27 @@ def with_sig(player):
     d = player["details"]
     parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
              player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
-             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"]]
+             d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"]]
     player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
     return player
+
+def listed(queue):
+    # As estações da lista: a fila sem a rádio que se está a experimentar
+    trying = preview_song(queue)
+    return [s for s in queue if s is not trying]
 
 def queue_sig(queue):
     # Muda só quando se juntam, removem ou trocam estações. A versão da fila do
     # MPD (status.playlist) também muda quando o stream a tocar muda de música,
-    # e o script recarregava a página a cada música
-    return hashlib.sha1(",".join(s["id"] for s in queue).encode()).hexdigest()[:12]
+    # e o script recarregava a página a cada música. A rádio a experimentar fica
+    # de fora: experimentar uma não recarrega a página
+    return hashlib.sha1(",".join(s["id"] for s in listed(queue)).encode()).hexdigest()[:12]
 
 def render_index(results=None, query="", filters=None, theme=None):
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
-        queue = c.playlistinfo()
+        queue = listed(c.playlistinfo())
         stored_playlists = sorted(p['playlist'] for p in c.listplaylists())
 
     info = station_info()
@@ -685,7 +746,7 @@ def render_index(results=None, query="", filters=None, theme=None):
     list_url = "/" + ("?" + urllib.parse.urlencode(list_params) if list_params else "")
     wanted = plain_text(list_filter)
     stations = [{"pos": s["pos"], "id": s["id"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
-                 "current": s["pos"] == player["current_pos"]} for s in queue]
+                 "current": s["id"] == player["current_id"]} for s in queue]
     for s in stations:
         # O nome já normalizado vai na página (data-plain), para o filtro do script
         # não ter de o normalizar de novo a cada tecla
@@ -705,7 +766,7 @@ def render_index(results=None, query="", filters=None, theme=None):
                                   stations=stations, queue_urls={s["file"] for s in queue}, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
-                                  playlists=playlists, active=active_playlist(),
+                                  playlists=playlists,
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme,
@@ -844,7 +905,7 @@ def estado(notice=None):
     player = with_sig(player_context(status, current, station_info()))
     # O polling manda o sig da barra que tem: se for igual, não se volta a fazer
     html_player = None if request.args.get("sig") == player["sig"] else render_template("player.html", **player)
-    return jsonify(player=html_player, sig=player["sig"], pos=player["current_pos"],
+    return jsonify(player=html_player, sig=player["sig"], id=player["current_id"],
                    station=player["current_station"], playing=status.get("state") == "play",
                    queue=queue_sig(queue), error=status.get("error", ""), notice=notice)
 
@@ -899,8 +960,12 @@ def logo(key):
         return initials_response(name)
     os.makedirs(LOGO_DIR, exist_ok=True)
     transient = False
+    preview = read_preview()
+    known_logo = info.get(stream_url, {}).get("logo")
+    if not known_logo and preview and preview["url"] == stream_url:
+        known_logo = preview.get("logo")
     try:
-        logo_url = info.get(stream_url, {}).get("logo") or lookup_logo(stream_url)
+        logo_url = known_logo or lookup_logo(stream_url)
         data = fetch_public(logo_url, LOGO_MAX_BYTES) if logo_url else b""
     except (OSError, ValueError) as e:
         data = b""
@@ -1090,10 +1155,16 @@ def add_theme():
         if target == active_playlist():
             # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
             # antes para a sincronização encontrar os nomes e logótipos das novas.
-            # Todas num só pedido ao MPD, em vez de uma ida e volta por rádio
-            if new:
+            # Todas num só pedido ao MPD, em vez de uma ida e volta por rádio.
+            # A que se estava a experimentar já está na fila: passa a ser da lista
+            preview = read_preview()
+            trying = preview["url"] if preview and preview["url"] in {u for u, _, _ in new} else None
+            if trying:
+                set_preview(None)
+            to_add = [u for u, _, _ in new if u != trying]
+            if to_add:
                 c.command_list_ok_begin()
-                for url, _, _ in new:
+                for url in to_add:
                     c.add(url)
                 c.command_list_end()
             write_m3u(path, entries + new)
@@ -1108,6 +1179,7 @@ def add_theme():
         # a próxima rádio juntada não pode reescrever a playlist antiga com a fila vazia
         set_active("")
         c.clear()
+        set_preview(None)
         c.load(target)
         if new:
             c.play(0)
@@ -1118,28 +1190,54 @@ def add_theme():
 # noutro aparelho depois de a página ser feita, a posição já é de outra estação
 @app.route("/play_id/<int:song_id>", methods=["POST"])
 def play_id(song_id):
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
         c.playid(song_id)
+        drop_preview(c, keep_url=c.currentsong().get("file"))
     return done()
 
 def step(c, delta):
-    # Estação anterior ou seguinte, dando a volta no fim da lista; parado, começa pela primeira
-    length = int(c.status().get("playlistlength", "0"))
-    if not length:
+    # Estação anterior ou seguinte, dando a volta no fim da lista; parado, ou a
+    # experimentar uma rádio, começa pela primeira. A que se experimenta não conta
+    ids = [s["id"] for s in listed(c.playlistinfo())]
+    if not ids:
         return
-    pos = c.currentsong().get("pos")
-    c.play((int(pos) + delta) % length if pos is not None else 0)
+    current = c.currentsong().get("id")
+    c.playid(ids[(ids.index(current) + delta) % len(ids)] if current in ids else ids[0])
+    drop_preview(c)
 
 @app.route("/previous", methods=["POST"])
 def previous():
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
         step(c, -1)
     return done()
 
 @app.route("/next", methods=["POST"])
 def next_station():
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
         step(c, +1)
+    return done()
+
+@app.route("/ouvir", methods=["POST"])
+def listen():
+    # Toca uma rádio dos resultados sem a juntar à lista. Fica no fim da fila até
+    # se tocar outra estação ou se carregar em "+ Juntar" no reprodutor
+    url = request.form.get("url", "").strip()
+    name = clean_name(request.form.get("name", ""))
+    logo = request.form.get("logo", "").strip()
+    if not safe_url(url):
+        return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://.", 400)
+    remember_uuids([(url, request.form.get("uuid", ""))])
+    with QUEUE_LOCK, mpd_client() as c:
+        song = next((s for s in c.playlistinfo() if s["file"] == url), None)
+        if song:
+            # Já está na lista (ou já se está a experimentar): só a toca
+            c.playid(song["id"])
+            drop_preview(c, keep_url=url)
+        else:
+            song_id = c.addid(url)
+            c.playid(song_id)
+            drop_preview(c)
+            set_preview({"url": url, "name": name or None, "logo": logo if LOGO_URL_RE.match(logo) else None})
     return done()
 
 @app.route("/vote", methods=["POST"])
@@ -1217,9 +1315,17 @@ def add_stream():
                 except FileNotFoundError:
                     pass
             with mpd_client() as c:
+                # A rádio que se estava a experimentar já está na fila: deixa de ser
+                # experiência e passa a ser da lista, no mesmo sítio
+                preview = read_preview()
+                promoted = bool(preview and preview["url"] == url)
+                if promoted:
+                    set_preview(None)
                 # Dois toques em "+ Rádio" (ou dois aparelhos) não a juntam duas vezes
-                if url not in {s["file"] for s in c.playlistinfo()}:
+                added = url not in {s["file"] for s in c.playlistinfo()}
+                if added:
                     c.add(url)
+                if added or promoted:
                     sync_active(c)
     return back()
 
@@ -1245,6 +1351,7 @@ def load_playlist():
         # rádio juntada não reescreve a playlist anterior só com ela
         set_active("")
         c.clear()
+        set_preview(None)
         c.load(name)
         # Uma playlist vazia não tem posição 0 para tocar
         if c.status().get("playlistlength", "0") != "0":
@@ -1269,6 +1376,7 @@ def create_playlist():
                 write_m3u(path, [])
                 set_active("")
                 c.clear()
+                set_preview(None)
         set_active(name)
     return redirect("/")
 

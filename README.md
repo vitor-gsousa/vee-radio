@@ -130,11 +130,14 @@ curl -sL https://raw.githubusercontent.com/vitor-gsousa/vee-radio/main/install.s
 
 - **Estações**: procurar pelo nome na lista atual e ordená-la pela ordem da playlist, pelas mais ouvidas, mais votadas ou pelas tendências (as que ganharam mais cliques desde o dia anterior) no radio-browser.info, ou de A a Z (só muda o que se vê, a playlist fica igual). Os números do radio-browser ficam guardados no telemóvel por um dia, por isso a primeira vez pode demorar uns segundos
 - **Reprodutor** (barra fixa no fundo, como no Spotify): estação e faixa atuais, tocar ou parar, estação anterior e seguinte, volume (±5%). Com os dados do radio-browser.info mostra também a bandeira do país, a qualidade do stream e os géneros (no telemóvel, só a qualidade), um botão para abrir o site da rádio e outro para votar nela (o radio-browser só aceita um voto na mesma rádio a cada 10 minutos)
-- **Estações**: a lista de rádios da playlist ativa, cujo nome aparece no topo. Toca-se numa estação para a ouvir e o ✕ remove-a.
-- **Juntar rádio**: pesquisar no [radio-browser.info](https://www.radio-browser.info) por nome, filtrando por país, língua e qualidade mínima e ordenando pelas mais ouvidas, mais votadas, pelas tendências ou aleatórias, ou colar o URL de um stream com um nome opcional
-- **Temas**: escolher um tema (Notícias, Jazz, Fado, Anos 80...), com os mesmos filtros, e juntar as rádios desse tema a uma playlist nova ou já existente, todas de uma vez ou uma a uma
-- **Países**: ver as rádios de um país (Portugal, Brasil, Espanha...) e juntá-las a uma playlist da mesma forma
-- **Playlists**: trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists
+- **Estações**: a lista de rádios da playlist ativa. Toca-se numa estação para a ouvir e o ✕ remove-a.
+- **Playlists** (o botão com o nome da playlist ativa, na barra de topo): trocar de playlist, criar uma nova (vazia ou com as estações atuais) e apagar playlists
+- **Descobrir**: uma janela com três separadores, que partilham os filtros de país, língua, qualidade mínima e ordenação (mais ouvidas, mais votadas, tendências, aleatórias ou todas de A a Z):
+  - **Nome**: pesquisar no [radio-browser.info](https://www.radio-browser.info) pelo nome, ou colar o URL de um stream com um nome opcional
+  - **Temas**: as rádios de um tema (Notícias, Jazz, Fado, Anos 80...)
+  - **Países**: as rádios de um país (Portugal, Brasil, Espanha...)
+
+  Em todos os resultados, o ▶ experimenta a rádio sem a juntar à lista (o reprodutor mostra "A experimentar" e um botão "+ Juntar") e o + junta-a à playlist ativa. Nos temas e países, "Juntar todas" junta-as também à playlist ativa, ou, se se escolher, a outra playlist ou a uma playlist nova, que passa a tocar.
 
 Os formulários abrem em janelas por cima da página. Com JavaScript, a pesquisa de rádios corre enquanto se escreve, os filtros aplicam-se ao mudar, aparecem esqueletos a brilhar enquanto os dados e os logótipos carregam, os botões respondem sem recarregar a página e a barra do reprodutor atualiza-se sozinha a cada 5 segundos (estação, música, volume). Sem JavaScript, tudo funciona na mesma, recarregando a página.
 

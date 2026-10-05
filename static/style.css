@@ -34,7 +34,6 @@ input[type="text"], input[type="search"], input[type="password"] { width: 100%; 
 .list-tools input { margin: 0; }
 .list-tools select { width: auto; margin: 0; }
 .list-tools button { width: auto; margin: 0; padding: 10px 14px; }
-.card-head .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; }
 .result-btn { text-align: left; margin: 6px 0 0 0; }
 .meta { font-size: 12px; color: #a6adc8; margin: 2px 0 8px 4px; }
 .warn { border-left: 4px solid #f38ba8; background: #313244; padding: 10px; border-radius: 6px; margin: 10px 0; }
@@ -77,6 +76,16 @@ hr { border: none; border-top: 1px solid #313244; margin: 16px 0; }
 .thumb { width: 46px; height: 46px; flex: none; margin-top: 6px; border-radius: 8px; background: #313244 center / contain no-repeat; }
 .thumb.has-img { background-color: #fff; object-fit: contain; }
 .result-body { flex: 1; min-width: 0; }
+/* ▶ Ouvir sem juntar, à direita de cada resultado */
+.result-play { flex: none; margin: 6px 0 0; }
+.result-play .icon { background: #313244; }
+.result-play .icon:hover { background: #45475a; }
+
+/* Separadores da janela Descobrir (Nome, Temas, Países) */
+.tabs { display: flex; gap: 6px; margin: 10px 0 8px; }
+.tabs a { flex: 1; padding: 8px 4px; border-radius: 8px; background: #313244; color: #cdd6f4; text-align: center; text-decoration: none; font-size: 14px; white-space: nowrap; }
+.tabs a:hover { background: #45475a; }
+.tabs a.on { background: #89b4fa; color: #11111b; font-weight: bold; }
 
 /* Temas */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -94,12 +103,15 @@ label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
 /* Barra de navegação no topo. O box-shadow e o clip-path estendem o fundo
    à largura do ecrã sem criar scroll horizontal */
 .topbar { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: -20px 0 20px; padding: 10px 0; background: #1e1e2e; box-shadow: 0 0 0 100vmax #1e1e2e; clip-path: inset(0 -100vmax); border-bottom: 1px solid #313244; }
-.brand { font-size: 18px; font-weight: bold; color: #89b4fa; text-decoration: none; white-space: nowrap; }
-.nav-actions { display: flex; gap: 6px; }
+.brand { flex: none; font-size: 18px; font-weight: bold; color: #89b4fa; text-decoration: none; white-space: nowrap; }
+.nav-actions { display: flex; gap: 6px; min-width: 0; }
 .nav-actions .btn { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+/* Playlist ativa, que abre a lista de playlists; um nome comprido fica cortado */
+.nav-actions .pl-switch { display: flex; gap: 4px; min-width: 0; max-width: 260px; }
+.pl-name { overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 480px) {
     .brand { font-size: 24px; }
-    .brand-name, .long { display: none; }
+    .brand-name { display: none; }
 }
 
 /* Reprodutor fixo no fundo. No telemóvel: estação e controlos em cima, volume por baixo */
@@ -116,6 +128,10 @@ label.field { display: block; margin: 12px 0 0 4px; font-size: 14px; }
 .player-detail { font-size: 12px; color: #7f849c; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-detail span + span::before { content: " · "; }
 .player-tag { display: none; }
+.player-trying { color: #f9e2af; }
+/* "+ Juntar" da rádio que se está a experimentar */
+.player-keep { flex: none; margin-left: auto; }
+.player-keep button { width: auto; margin: 0; padding: 8px 12px; font-size: 14px; white-space: nowrap; }
 .player-volume .icon { flex: none; }
 a.icon { display: block; box-sizing: border-box; }
 /* Votar: coração vazio, cheio depois de votar (o radio-browser só aceita um voto a cada 10 minutos) */
@@ -180,7 +196,6 @@ body.busy::before { content: ""; position: fixed; top: 0; left: 0; z-index: 20; 
     .brand { font-size: 22px; }
     .nav-actions .btn { padding: 10px 16px; font-size: 15px; }
     .list-tools { order: 1; flex: 0 1 440px; margin-left: auto; }
-    .card-head > .btn { order: 2; }
     .refine { display: flex; gap: 6px; align-items: center; }
     .refine .filters { flex: 1; min-width: 0; }
     .refine button { width: auto; margin: 0; padding: 10px 14px; }

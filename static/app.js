@@ -209,6 +209,10 @@
         // o filtro escrito entretanto só está no URL atual
         var next = tile && form.querySelector('input[name="next"]');
         if (next) next.value = listUrl();
+        // "+ Juntar" no reprodutor volta à página que está aberta (por exemplo, aos
+        // resultados, para mostrar o ✓), e não sempre a /
+        var keep = form.closest(".player") && form.querySelector('input[name="next"]');
+        if (keep) keep.value = location.pathname + location.search + location.hash;
         var data = new FormData(form);
         if (submitter && submitter.name) data.append(submitter.name, submitter.value);
         var action = new URL(form.getAttribute("action") || location.href, location.href);
@@ -261,7 +265,7 @@
         }
         // Só o cartão que deixou de tocar e o que passou a tocar, e não todos a cada 5 s
         var was = document.querySelector(".tile.current");
-        var now = state.pos == null ? null : document.querySelector('.tile[data-pos="' + CSS.escape(String(state.pos)) + '"]');
+        var now = state.id == null ? null : document.querySelector('.tile[data-id="' + CSS.escape(String(state.id)) + '"]');
         if (was !== now) {
             if (was) was.classList.remove("current");
             if (now) now.classList.add("current");
@@ -343,12 +347,20 @@
     });
 
     // Mudar a ordenação da lista ou um filtro aplica-o logo, sem o botão OK ou
-    // Atualizar. Nas janelas Temas e Países os filtros só escolhem o que vem
+    // Atualizar. Nos separadores Temas e Países os filtros só escolhem o que vem
     // depois de carregar num tema ou país, por isso aí não se envia nada
     document.addEventListener("change", function (e) {
         var t = e.target;
         if (t.matches(".list-tools select")) return t.form.requestSubmit();
         if (!t.closest(".filters")) return;
+        // Os separadores de Descobrir partilham os filtros: o que se escolhe num
+        // vale nos outros (sem script, cada um fica com o que veio na página)
+        if (t.closest("#juntar, #temas, #paises")) {
+            document.querySelectorAll('#juntar, #temas, #paises').forEach(function (m) {
+                var same = m.querySelector('.filters select[name="' + CSS.escape(t.name) + '"]');
+                if (same && same !== t) same.value = t.value;
+            });
+        }
         if (t.form.matches(".refine")) return t.form.requestSubmit();
         var query = t.form.querySelector('input[name="q"]');
         if (query && query.value.trim()) t.form.requestSubmit();

@@ -4,13 +4,26 @@
     <meta charset="utf-8">
     {# viewport-fit=cover: o Chrome no Android desenha a página por baixo da barra de
        navegação do sistema; com ele, o env(safe-area-inset-bottom) do CSS diz quanto
-       espaço deixar para o reprodutor não ficar cortado #}
+       espaço deixar para o reprodutor e os separadores não ficarem cortados #}
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0e0e11">
     <title>{% block title %}Comando Rádio{% endblock %}</title>
     {# Opcional: sem ele a página funciona na mesma, com formulários e redirects #}
     <script src="{{ asset_url('app.js') }}" defer></script>
     {# Marca a página como tendo JavaScript logo no início, para os esqueletos das imagens só aparecerem com ele #}
     <script>document.documentElement.classList.add("js");</script>
+    {# A fonte (Manrope) está no próprio telemóvel: funciona na rede local e sem pedir nada a outros sites #}
+    {# O @font-face fica aqui e não no style.css para os endereços levarem o hash
+       (asset_url), como o preload: assim a fonte é pedida uma só vez e fica em cache #}
+    <link rel="preload" href="{{ asset_url('fonts/manrope-latin.woff2') }}" as="font" type="font/woff2" crossorigin>
+    <style>
+        @font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap;
+            src: url("{{ asset_url('fonts/manrope-latin.woff2') }}") format("woff2");
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+        @font-face { font-family: "Manrope"; font-style: normal; font-weight: 200 800; font-display: swap;
+            src: url("{{ asset_url('fonts/manrope-latin-ext.woff2') }}") format("woff2");
+            unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+    </style>
     <link rel="stylesheet" href="{{ asset_url('style.css') }}">
 </head>
 <body>

@@ -1,0 +1,103 @@
+{# Peças comuns às páginas. Importado com "with context", para ver as listas
+   (países, playlists...) e a playlist escolhida em "Juntar a" #}
+
+{# Lista de ordenações, usada nos filtros do radio-browser e na lista de estações #}
+{% macro order_select(name, options, selected) %}
+        <select name="{{ name }}" aria-label="Ordenar">
+            {% for key, label in options %}<option value="{{ key }}"{% if selected == key %} selected{% endif %}>{{ label[:1]|upper }}{{ label[1:] }}</option>{% endfor %}
+        </select>
+{% endmacro %}
+
+{# Caixa de pesquisa com uma lupa e um ✕ para a limpar. Sem JavaScript, o ✕ é um link
+   para a mesma página sem o texto; com ele, limpa a caixa e fica lá o cursor #}
+{% macro search_box(name, value, placeholder, clear_href, required=False, big=False) %}
+        <span class="search-box{% if big %} big{% endif %}">
+            {{ icon("magnifying-glass", "search-icon") }}
+            <input type="search" name="{{ name }}" value="{{ value }}" placeholder="{{ placeholder }}" aria-label="{{ placeholder }}"{% if required %} required{% endif %}>
+            <a class="search-clear" href="{{ clear_href }}" title="Limpar" aria-label="Limpar"{% if not value %} hidden{% endif %}>{{ icon("x") }}</a>
+        </span>
+{% endmacro %}
+
+{# Filtros da pesquisa e dos temas: país, língua, qualidade e ordenação, que vão para o radio-browser.
+   À frente, "Juntar a": a playlist para onde vai o + dos resultados (por omissão, a que está a tocar) #}
+{% macro filter_fields(country=True) %}
+    <div class="filters">
+        <label class="target-field"><span>Juntar a</span>
+        <select name="para">
+            <option value="">{% if active %}{{ active }} (a tocar){% else %}Lista principal{% endif %}</option>
+            {% for pl in playlists if pl.name != active %}<option value="{{ pl.name }}"{% if para == pl.name %} selected{% endif %}>{{ pl.name }}</option>{% endfor %}
+        </select>
+        </label>
+        {% if country %}
+        <select name="pais" aria-label="País">
+            <option value="">Todos os países</option>
+            {% for code, label in countries %}<option value="{{ code }}"{% if filters.pais == code %} selected{% endif %}>{{ code|flag }} {{ label }}</option>{% endfor %}
+        </select>
+        {% endif %}
+        <select name="lingua" aria-label="Língua">
+            <option value="">Todas as línguas</option>
+            {% for key, label in languages %}<option value="{{ key }}"{% if filters.lingua == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <select name="kbps" aria-label="Qualidade mínima">
+            <option value="">Qualquer qualidade</option>
+            {% for k in bitrates %}<option value="{{ k }}"{% if filters.kbps == k %} selected{% endif %}>{{ k }} kbps ou mais</option>{% endfor %}
+        </select>
+        {{- order_select("ordem", orders, filters.ordem) }}
+    </div>
+{% endmacro %}
+
+{# Para onde vão as rádios dos resultados #}
+{% macro destination() %}
+            <p class="hint">{{ icon("play-fill") }} experimenta sem juntar · {{ icon("plus") }} junta {% if para %}a «{{ para }}» (a música não muda){% elif active %}a «{{ active }}»{% else %}à lista (que não está guardada){% endif %}</p>
+{% endmacro %}
+
+{# Uma rádio nos resultados: ▶ experimenta sem juntar, + junta à playlist escolhida #}
+{% macro result_row(r, back_to, tags=False) %}
+            <div class="row-item">
+                {# O favicon vem direto do radio-browser e só carrega quando aparece no ecrã #}
+                {% if r.favicon %}<img class="thumb" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="thumb empty">{{ icon("radio") }}</span>{% endif %}
+                <div class="row-body">
+                    <div class="row-title">{{ r.name }}</div>
+                    <div class="row-meta">{{ r.countrycode|flag }} {{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if tags and r.tags %} · {{ r.tags[:60] }}{% endif %}</div>
+                </div>
+                <form action="/ouvir" method="post">
+                    <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                    <input type="hidden" name="name" value="{{ r.name }}">
+                    <input type="hidden" name="logo" value="{{ r.favicon }}">
+                    <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
+                    <input type="hidden" name="next" value="{{ back_to }}">
+                    <button class="icon-btn" title="Ouvir sem juntar" aria-label="Ouvir {{ r.name }} sem juntar">{{ icon("play-fill") }}</button>
+                </form>
+                {% if r.url_resolved in target_urls %}
+                <span class="icon-btn done" title="Já está {% if para %}em «{{ para }}»{% else %}na lista{% endif %}" aria-label="Já está na lista">{{ icon("check-circle") }}</span>
+                {% else %}
+                <form action="/add_stream" method="post">
+                    <input type="hidden" name="url" value="{{ r.url_resolved }}">
+                    <input type="hidden" name="name" value="{{ r.name }}">
+                    <input type="hidden" name="logo" value="{{ r.favicon }}">
+                    <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
+                    <input type="hidden" name="next" value="{{ back_to }}">
+                    {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
+                    <button class="icon-btn add" title="Juntar{% if para or active %} a «{{ para or active }}»{% endif %}" aria-label="Juntar {{ r.name }}">{{ icon("plus") }}</button>
+                </form>
+                {% endif %}
+            </div>
+{% endmacro %}
+
+{# Capa de uma playlist: os logótipos das primeiras quatro estações, ou um ícone #}
+{% macro cover(pl, big=False) %}
+    <span class="cover{% if big %} big{% endif %}{% if pl.cover|length >= 4 %} grid{% endif %}" aria-hidden="true">
+        {% if pl.cover|length >= 4 %}
+            {% for key, name in pl.cover %}<img src="/logo/{{ key }}?n={{ name|urlencode }}" alt="" loading="lazy">{% endfor %}
+        {% elif pl.cover %}
+            <img src="/logo/{{ pl.cover[0][0] }}?n={{ pl.cover[0][1]|urlencode }}" alt="" loading="lazy">
+        {% else %}
+            {{ icon("playlist") }}
+        {% endif %}
+    </span>
+{% endmacro %}
+
+{# Botão de voltar (substitui os links "← Temas") #}
+{% macro back(href, label) %}
+    <a class="back-btn" href="{{ href }}">{{ icon("caret-left") }}<span>{{ label }}</span></a>
+{% endmacro %}

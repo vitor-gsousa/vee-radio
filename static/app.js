@@ -45,16 +45,7 @@
         document.querySelectorAll(".modal.open").forEach(function (m) {
             if (m !== target) m.classList.remove("open");
         });
-        if (target && target.classList.contains("modal")) {
-            target.classList.add("open");
-        } else if (location.pathname === "/search" || location.pathname === "/tema" ||
-                   location.pathname === "/playlist" || new URLSearchParams(location.search).has("para")) {
-            // Fechou-se a janela da pesquisa, do tema ou de uma playlist: o URL volta a
-            // ser o da lista, para as atualizações da página não voltarem a pedir tudo à
-            // API, e "Juntar a" volta à playlist a tocar
-            history.replaceState(null, "", listUrl() + location.hash);
-            currentPath = location.pathname + location.search;
-        }
+        if (target && target.classList.contains("modal")) target.classList.add("open");
     }
 
     // A lista de estações com o filtro e a ordenação que estão no URL
@@ -96,8 +87,8 @@
     }
 
     // Os filtros de Descobrir ficam lembrados neste browser (só aqui: não vão para
-    // o telemóvel nem para quem usa o mesmo link). Repõem-se na página principal;
-    // nas páginas de resultados os filtros são os do URL
+    // o telemóvel nem para quem usa o mesmo link). Repõem-se nas páginas de Descobrir
+    // que não os trazem no URL; nas de resultados valem os do URL
     var FILTERS_KEY = "vee-radio-filtros";
 
     function savedFilters() {
@@ -118,10 +109,14 @@
         }
     }
 
+    var DISCOVER_PAGES = ["/descobrir", "/descobrir/temas", "/descobrir/paises"];
+
     function restoreFilters() {
-        if (location.pathname !== "/") return;
+        if (DISCOVER_PAGES.indexOf(location.pathname) === -1) return;
         var saved = savedFilters();
-        document.querySelectorAll("#juntar .filters select, #temas .filters select, #paises .filters select").forEach(function (sel) {
+        var inUrl = new URLSearchParams(location.search);
+        document.querySelectorAll(".filters select").forEach(function (sel) {
+            if (sel.name === "para" || inUrl.has(sel.name)) return;
             var value = saved[sel.name];
             // Só valores que ainda existem na lista (um país retirado fica em "Todos")
             if (typeof value === "string" && Array.prototype.some.call(sel.options, function (o) { return o.value === value; })) {
@@ -146,24 +141,23 @@
             stations.classList.add("is-loading");
             return function () { stations.classList.remove("is-loading"); };
         }
-        var box = form.closest(".modal-box");
-        var results = box && box.querySelector(".results");
+        // Pesquisa ou filtros de um tema: os resultados ficam no mesmo sítio
+        var results = (form.matches(".search-form") || form.matches(".refine")) && document.querySelector(".results");
         if (results) {
             var before = results.innerHTML;
             results.innerHTML = skeletonRows(6);
             return function () { results.innerHTML = before; };
         }
-        // Escolher um tema ou um país: a janela com as rádios ainda não existe,
-        // por isso abre-se uma provisória com o nome escolhido
-        var modal = form.closest(".modal");
-        if (!modal || !submitter) return null;
-        var loading = document.createElement("div");
-        loading.className = "modal open";
-        loading.innerHTML = '<a class="backdrop" href="#fechar" aria-label="Fechar"></a><div class="modal-box">' +
-            '<h3></h3><p class="meta">A procurar rádios…</p>' + skeletonRows(6) + "</div>";
-        loading.querySelector("h3").textContent = submitter.textContent.trim();
-        document.body.appendChild(loading);
-        return function () { loading.remove(); };
+        // Escolher um tema ou um país: a página das rádios ainda não existe, por
+        // isso a página atual passa a um esqueleto com o nome escolhido
+        var main = document.querySelector(".main");
+        if (!main || !submitter) return null;
+        var page = main.innerHTML;
+        main.innerHTML = '<header class="page-head"><div class="page-head-text"><h1></h1>' +
+            '<p class="muted">A procurar rádios…</p></div></header>' + skeletonRows(8);
+        main.querySelector("h1").textContent = submitter.textContent.trim();
+        window.scrollTo(0, 0);
+        return function () { main.innerHTML = page; };
     }
 
     // Guarda o campo de texto onde se está a escrever, para continuar nele depois
@@ -192,9 +186,25 @@
         }
     }
 
-    // Troca o conteúdo da página pelo de uma resposta HTML. Mantém o scroll da
-    // página e, quando não é uma página nova, também o da janela aberta (por
-    // exemplo, depois de juntar uma rádio a partir dos resultados da pesquisa)
+    // Mostra o elemento do #fragmento (por exemplo, #e12, a estação a tocar) e acende-o
+    function revealHash() {
+        var id = decodeURIComponent(location.hash.slice(1));
+        var el = id && document.getElementById(id);
+        if (!el || el.classList.contains("modal")) return false;
+        var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
+        if (el.classList.contains("tile")) {
+            el.classList.remove("flash");
+            void el.offsetWidth;
+            el.classList.add("flash");
+            setTimeout(function () { el.classList.remove("flash"); }, 1300);
+        }
+        return true;
+    }
+
+    // Troca o conteúdo da página pelo de uma resposta HTML. Na mesma página mantém
+    // o scroll da página e o da janela aberta (por exemplo, depois de juntar uma
+    // rádio a partir dos resultados); noutra página começa no topo
     function swap(html, url, push) {
         var doc = new DOMParser().parseFromString(html, "text/html");
         var modal = openModal();
@@ -202,6 +212,7 @@
         var keep = box && !push && { id: modal.id, top: box.scrollTop };
         var focus = saveFocus();
         var y = window.scrollY;
+        var samePage = !url || new URL(url, location.href).pathname === location.pathname;
         document.title = doc.title;
         document.body.innerHTML = doc.body.innerHTML;
         if (url) {
@@ -209,7 +220,8 @@
             currentPath = location.pathname + location.search;
         }
         syncModals();
-        window.scrollTo(0, y);
+        window.scrollTo(0, samePage ? y : 0);
+        if (!samePage) revealHash();
         modal = openModal();
         if (keep && modal && modal.id === keep.id) modal.querySelector(".modal-box").scrollTop = keep.top;
         markLoadedImages();
@@ -306,10 +318,14 @@
             var fresh = new DOMParser().parseFromString(state.player, "text/html").querySelector(".player");
             if (fresh && fresh.dataset.sig !== player.dataset.sig) {
                 // O logótipo é o mesmo se a estação não mudou: não volta a brilhar
-                var oldLogo = player.querySelector("img.player-logo.loaded");
-                var newLogo = fresh.querySelector("img.player-logo");
-                if (oldLogo && newLogo && oldLogo.getAttribute("src") === newLogo.getAttribute("src")) newLogo.classList.add("loaded");
+                var loaded = {};
+                player.querySelectorAll("img.loaded").forEach(function (img) { loaded[img.getAttribute("src")] = true; });
+                fresh.querySelectorAll("img").forEach(function (img) {
+                    if (loaded[img.getAttribute("src")]) img.classList.add("loaded");
+                });
                 player.replaceWith(fresh);
+                // O reprodutor aberto (#tocar) vem dentro da barra nova: continua aberto
+                syncModals();
             }
         }
         // Só o cartão que deixou de tocar e o que passou a tocar, e não todos a cada 5 s
@@ -322,10 +338,11 @@
         updateTitle(state.station, state.playing);
         if (state.notice) toast(state.notice.text, state.notice.ok);
         // A lista de estações mudou noutro aparelho, ou apareceu ou desapareceu o
-        // aviso de erro: recarrega a página, mas nunca com uma janela aberta
+        // aviso de erro: recarrega a página, mas nunca com uma janela aberta. Só no
+        // Início, que é onde estão a lista e o aviso
         var list = document.getElementById("estacoes");
-        var changed = (list && list.dataset.queue !== String(state.queue)) ||
-            !!state.error !== !!document.getElementById("aviso");
+        var changed = list && (list.dataset.queue !== String(state.queue) ||
+            !!state.error !== !!document.getElementById("aviso"));
         if (changed && !openModal() && !busy) load(location.pathname + location.search + location.hash, false);
         return true;
     }
@@ -384,20 +401,31 @@
         input.focus();
     });
 
-    // Tocar na estação do reprodutor: desliza até ao cartão e acende-o, sem
-    // deixar #e<id> no URL (sem script, o link salta para o cartão)
+    // "Mostrar na lista" no reprodutor aberto: no Início fecha-o, desliza até ao
+    // cartão e acende-o; noutra página vai ao Início (e o swap mostra o cartão)
     document.addEventListener("click", function (e) {
-        var go = e.target.closest("a.player-go");
-        var tile = go && document.getElementById(go.getAttribute("href").slice(1));
+        var go = e.target.closest("a.show-in-list");
+        var tile = go && document.getElementById(go.getAttribute("href").split("#")[1]);
         if (!tile) return;
         e.preventDefault();
+        location.hash = "fechar";
         if (tile.hidden) return toast("A estação a tocar está escondida pelo filtro da lista.");
-        var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        tile.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "center" });
-        tile.classList.remove("flash");
-        void tile.offsetWidth;
-        tile.classList.add("flash");
-        setTimeout(function () { tile.classList.remove("flash"); }, 1300);
+        history.replaceState(null, "", location.pathname + location.search + "#" + tile.id);
+        revealHash();
+    });
+
+    // Navegação entre páginas sem recarregar tudo: o script pede a página e troca o
+    // conteúdo, como nos formulários. Os links que só mudam o # (as janelas) ficam
+    // com o browser, e os de outros sites, ficheiros e logótipos também
+    document.addEventListener("click", function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest("a[href]");
+        if (!a || a.target || a.hasAttribute("download")) return;
+        var url = new URL(a.href, location.href);
+        if (url.origin !== location.origin || /^\/(logo|static|entrar)(\/|$)/.test(url.pathname)) return;
+        if (url.pathname === location.pathname && url.search === location.search) return;
+        e.preventDefault();
+        load(url.pathname + url.search + url.hash, true);
     });
 
     document.addEventListener("input", function (e) {
@@ -406,7 +434,7 @@
         if (clear) clear.hidden = !t.value;
         if (t.matches(".list-tools input")) return filterList(t);
         // Procurar rádios enquanto se escreve
-        if (t.matches('#juntar input[name="q"]')) {
+        if (t.matches('.search-form input[name="q"]')) {
             clearTimeout(searchTimer);
             if (t.value.trim().length >= SEARCH_MIN_CHARS) {
                 searchTimer = setTimeout(function () { t.form.requestSubmit(); }, SEARCH_DELAY_MS);
@@ -421,16 +449,9 @@
         var t = e.target;
         if (t.matches(".list-tools select")) return t.form.requestSubmit();
         if (!t.closest(".filters")) return;
-        // Os separadores de Descobrir partilham os filtros: o que se escolhe num
-        // vale nos outros (sem script, cada um fica com o que veio na página)
-        if (t.closest("#juntar, #temas, #paises")) {
-            document.querySelectorAll('#juntar, #temas, #paises').forEach(function (m) {
-                var same = m.querySelector('.filters select[name="' + CSS.escape(t.name) + '"]');
-                if (same && same !== t) same.value = t.value;
-            });
-            // A playlist de "Juntar a" não fica lembrada: ao voltar, é a que está a tocar
-            if (t.name !== "para") saveFilter(t.name, t.value);
-        }
+        // Os filtros ficam lembrados para as outras páginas de Descobrir. A playlist de
+        // "Juntar a" não: ao voltar, é a que está a tocar
+        if (t.name !== "para") saveFilter(t.name, t.value);
         if (t.form.matches(".refine")) return t.form.requestSubmit();
         var query = t.form.querySelector('input[name="q"]');
         if (query && query.value.trim()) return t.form.requestSubmit();

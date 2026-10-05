@@ -1,0 +1,91 @@
+{% extends "layout.html" %}
+{% import "macros.html" as m with context %}
+{# Início: a playlist que está a tocar (a fila do MPD), em cartões #}
+{% block content %}
+    <header class="page-head">
+        <div class="page-head-text">
+            <p class="eyebrow">{% if active %}A tocar · playlist{% else %}Lista por guardar{% endif %}</p>
+            <h1>{{ active or 'Estações' }}</h1>
+            <p class="muted">{% if active %}{{ stations|length }} {{ 'estação' if stations|length == 1 else 'estações' }} · as alterações ficam guardadas{% else %}Estas estações não estão guardadas{% endif %}</p>
+        </div>
+        <div class="page-head-actions">
+            {% if not active and stations %}
+            <a class="btn primary small" href="#nova">{{ icon("floppy-disk") }}<span>Guardar como playlist</span></a>
+            {% endif %}
+            <a class="icon-btn" href="/playlists" title="Trocar de playlist" aria-label="Trocar de playlist">{{ icon("playlist") }}</a>
+            {% if config %}<a class="icon-btn" href="#config" title="Configurações" aria-label="Configurações">{{ icon("gear-six") }}</a>{% endif %}
+        </div>
+    </header>
+
+    {% if status.error %}
+    {# Com saída: tocar outra, procurar a rádio outra vez (o endereço pode ter mudado) ou removê-la #}
+    <div class="notice danger" id="aviso">
+        {{ icon("warning-circle", "notice-icon") }}
+        <div class="notice-body">
+            <strong>{% if failed %}«{{ failed.name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> O endereço pode ter mudado ou a rádio pode estar em baixo.
+            <div class="small muted">{{ status.error }}</div>
+            <div class="notice-actions">
+                {% if stations %}
+                <form action="/next" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="btn small">{{ icon("skip-forward-fill") }}<span>Tocar a seguinte</span></button></form>
+                {% endif %}
+                {% if failed %}
+                <a class="btn small" href="/search?q={{ failed.name|urlencode }}">{{ icon("magnifying-glass") }}<span>Procurar outra vez</span></a>
+                <form action="/remove/{{ failed.id }}" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="btn small danger">{{ icon("trash") }}<span>Remover</span></button></form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Depois do ✕: anular durante UNDO_SECONDS. O script esconde-a quando o tempo acaba #}
+    {% if removed %}
+    <div class="notice undo" data-left="{{ removed.left }}">
+        {{ icon("trash", "notice-icon") }}
+        <span class="notice-body">«{{ removed.name }}» saiu da lista.</span>
+        <form action="/anular" method="post">
+            <input type="hidden" name="next" value="{{ list_url }}">
+            <button class="btn small">{{ icon("arrow-counter-clockwise") }}<span>Anular</span></button>
+        </form>
+    </div>
+    {% endif %}
+
+    <section id="estacoes" data-queue="{{ queue_sig }}">
+        {% if stations|length > 1 or list_filter %}
+        {# Sem JavaScript filtra com Enter e ordena com o OK; com ele, filtra enquanto se escreve #}
+        <form class="list-tools" action="/" method="get" role="search">
+            {{ m.search_box("filtro", list_filter, "Procurar nesta lista", "/?ordenar=" ~ list_order if list_order else "/") }}
+            {{ m.order_select("ordenar", list_orders, list_order) }}
+            <noscript><button class="btn">OK</button></noscript>
+        </form>
+        {% endif %}
+        {# A ordenação e o filtro só mudam o que se vê; o script mostra ou esconde a nota enquanto se escreve #}
+        <p class="hint order-note" id="nota-ordem"{% if not (list_order or list_filter) %} hidden{% endif %}>{{ icon("skip-back-fill") }}{{ icon("skip-forward-fill") }} seguem a ordem da playlist, incluindo as estações que o filtro esconde.</p>
+        <div class="stations">
+        {% for s in stations %}
+            <div class="tile{% if s.current %} current{% endif %}" id="e{{ s.id }}" data-id="{{ s.id }}" data-plain="{{ s.plain }}"{% if s.hidden %} hidden{% endif %}>
+                <form action="/play_id/{{ s.id }}" method="post">
+                    <input type="hidden" name="next" value="{{ list_url }}">
+                    <button class="tile-play" title="Tocar {{ s.name }}">
+                        <span class="tile-art"><img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy"><span class="tile-fab">{{ icon("play-fill") }}</span></span>
+                        <span class="tile-name">{{ s.name }}</span>
+                        {% if s.stat is defined %}<span class="tile-stat" title="{% if list_order == 'votes' %}Votos{% elif list_order == 'clicktrend' %}Variação dos cliques face ao dia anterior{% else %}Cliques nas últimas 24 horas{% endif %} no radio-browser.info">{% if list_order == 'votes' %}{{ icon("heart-fill") }} {{ s.stat|compact }}{% elif list_order == 'clicktrend' %}{% if s.stat < 0 %}↘ −{{ (-s.stat)|compact }}{% else %}↗ +{{ s.stat|compact }}{% endif %}{% else %}{{ icon("play-fill") }} {{ s.stat|compact }}{% endif %}</span>{% endif %}
+                    </button>
+                </form>
+                <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text">A tocar</span></span>
+                <form action="/remove/{{ s.id }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ list_url }}"><button title="Remover" aria-label="Remover {{ s.name }}">{{ icon("x") }}</button></form>
+            </div>
+        {% endfor %}
+        {% if stations %}
+            <p class="muted empty" id="sem-resultados"{% if stations|rejectattr("hidden")|list %} hidden{% endif %}>Nenhuma estação desta lista tem esse nome.</p>
+        {% endif %}
+        </div>
+        {% if not stations %}
+        <div class="empty-state">
+            {{ icon("radio", "empty-icon") }}
+            <h2>Ainda não há estações</h2>
+            <p class="muted">Procura rádios por nome, tema ou país e junta as que gostares.</p>
+            <a class="btn primary" href="/descobrir">{{ icon("compass") }}<span>Descobrir rádios</span></a>
+        </div>
+        {% endif %}
+    </section>
+{% endblock %}

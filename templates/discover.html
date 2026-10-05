@@ -1,0 +1,136 @@
+{% extends "layout.html" %}
+{% import "macros.html" as m with context %}
+{# Descobrir: pesquisa por nome, temas e países (cada um com o seu endereço) e os
+   resultados de um tema ou país (/tema). O "Juntar a" passa de separador em separador #}
+{% block content %}
+    {% set para_qs = "?para=" ~ para|urlencode if para else "" %}
+    {% if tab == "tema" %}
+    <header class="page-head">
+        <div class="page-head-text">
+            {{ m.back(("/descobrir/temas" if theme.tag else "/descobrir/paises") ~ para_qs, "Temas" if theme.tag else "Países") }}
+            <h1>{{ theme.label }}</h1>
+            <p class="muted">{% if theme.results %}{% if filters.ordem == 'name' %}{{ theme.results|length }} rádios, de A a Z{% else %}As {{ theme.results|length }} rádios {{ dict(orders)[filters.ordem] }}{% endif %}{% else %}Sem rádios{% endif %}</p>
+        </div>
+    </header>
+    {# Mudar o país ou a ordenação sem voltar atrás #}
+    <form action="/tema" method="get" class="refine panel">
+        {% if theme.tag %}<input type="hidden" name="t" value="{{ theme.tag }}">{% endif %}
+        {{ m.filter_fields(country=theme.tag) }}
+        {% if not theme.tag %}<input type="hidden" name="pais" value="{{ filters.pais }}">{% endif %}
+        <button class="btn">Atualizar</button>
+    </form>
+    {# O script troca o que está dentro de .results por um esqueleto enquanto espera pela API #}
+    <div class="results">
+    {% if theme.results %}
+    {% set existing = playlists|map(attribute='name')|list %}
+    <form action="/add_theme" method="post" class="theme-add panel">
+        <input type="hidden" name="label" value="{{ theme.label }}">
+        {% for r in theme.results %}
+        <input type="hidden" name="url" value="{{ r.url_resolved }}">
+        <input type="hidden" name="name" value="{{ r.name }}">
+        <input type="hidden" name="logo" value="{{ r.favicon }}">
+        <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
+        {% endfor %}
+        {# Por omissão vão para a playlist escolhida em "Juntar a" (ou a que está a tocar).
+           A playlist nova é escolha explícita, porque passa a tocar no lugar da atual #}
+        <label class="field" for="theme-target">Juntar todas a</label>
+        <div class="inline-form">
+            <select name="target" id="theme-target">
+                {% if active %}
+                <option value="{{ active }}">{{ active }} (a tocar)</option>
+                {% endif %}
+                {% if theme.label != active %}
+                {% if theme.label in existing %}
+                <option value="{{ theme.label }}"{% if para == theme.label %} selected{% endif %}>{{ theme.label }}</option>
+                {% else %}
+                <option value="">Nova playlist «{{ theme.label }}» (passa a tocar)</option>
+                {% endif %}
+                {% endif %}
+                {% for pl in playlists if pl.name != theme.label and pl.name != active %}
+                <option value="{{ pl.name }}"{% if para == pl.name %} selected{% endif %}>{{ pl.name }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn primary">{{ icon("plus") }}<span>Juntar {{ theme.results|length }}</span></button>
+        </div>
+        <p class="muted small">Só se juntam as que ainda não estão na playlist escolhida.</p>
+    </form>
+    <h2 class="section-title">Uma a uma</h2>
+    {{ m.destination() }}
+    {% endif %}
+    <div class="rows">
+    {% for r in theme.results %}
+    {{ m.result_row(r, request.full_path) }}
+    {% else %}
+    <div class="empty-state">
+        {{ icon("radio", "empty-icon") }}
+        <p class="muted">Não há rádios {% if theme.tag and filters.pais %}deste tema neste país. Experimenta «Todos os países»{% else %}aqui{% endif %}.</p>
+    </div>
+    {% endfor %}
+    </div>
+    </div>
+
+    {% else %}
+    <header class="page-head">
+        <div class="page-head-text">
+            <h1>Descobrir</h1>
+            <p class="muted">Rádios do radio-browser.info, de todo o mundo.</p>
+        </div>
+    </header>
+    <nav class="tabs" aria-label="Descobrir por">
+        {% for id, href, label, ic in [("nome", "/descobrir", "Nome", "magnifying-glass"), ("temas", "/descobrir/temas", "Temas", "music-notes"), ("paises", "/descobrir/paises", "Países", "globe-hemisphere-west")] %}
+        <a href="{{ href }}{{ para_qs }}"{% if id == tab %} class="on" aria-current="page"{% endif %}>{{ icon(ic) }}<span>{{ label }}</span></a>
+        {% endfor %}
+    </nav>
+
+    {% if tab == "nome" %}
+    <form action="/search" method="get" class="search-form">
+        {{ m.search_box("q", query, "Nome da rádio (ex: Comercial, Antena 1)", "/descobrir" ~ para_qs, required=True, big=True) }}
+        {{ m.filter_fields() }}
+        <button class="btn primary">{{ icon("magnifying-glass") }}<span>Procurar</span></button>
+    </form>
+    {{ m.destination() }}
+    <div class="results">
+    {% if results is not none %}
+        <div class="rows">
+        {% for r in results %}
+        {{ m.result_row(r, request.full_path, tags=True) }}
+        {% else %}
+        <div class="empty-state">
+            {{ icon("magnifying-glass", "empty-icon") }}
+            <p class="muted">Nenhuma rádio encontrada.</p>
+        </div>
+        {% endfor %}
+        </div>
+    {% endif %}
+    </div>
+    {# Para quem já tem o endereço de um stream; fechado por omissão #}
+    <details class="panel url-add">
+        <summary>{{ icon("link-simple") }}<span>Juntar pelo endereço do stream</span>{{ icon("caret-down", "summary-caret") }}</summary>
+        <form action="/add_stream" method="post" class="stack">
+            <input type="text" name="url" placeholder="URL (ex: http://...mp3)" required>
+            <input type="text" name="name" placeholder="Nome da estação (opcional)">
+            {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
+            <button class="btn primary">{{ icon("plus") }}<span>Juntar{% if para %} a «{{ para }}»{% endif %}</span></button>
+        </form>
+    </details>
+
+    {% elif tab == "temas" %}
+    <form action="/tema" method="get">
+        <div class="panel">{{ m.filter_fields() }}</div>
+        <p class="hint">Escolhe um tema para ver as suas rádios.</p>
+        <div class="genre-grid">
+            {% for tag, label in themes %}<button class="genre g{{ loop.index0 % 8 }}" name="t" value="{{ tag }}"><span>{{ label }}</span>{{ icon("music-notes", "genre-icon") }}</button>{% endfor %}
+        </div>
+    </form>
+
+    {% else %}
+    <form action="/tema" method="get">
+        <div class="panel">{{ m.filter_fields(country=False) }}</div>
+        <p class="hint">Escolhe um país para ver as suas rádios. Para um tema de um país, escolhe o país nos filtros dos Temas.</p>
+        <div class="country-grid">
+            {% for code, label in countries %}<button class="country" name="pais" value="{{ code }}"><span class="country-flag">{{ code|flag }}</span><span>{{ label }}</span></button>{% endfor %}
+        </div>
+    </form>
+    {% endif %}
+    {% endif %}
+{% endblock %}

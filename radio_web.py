@@ -20,7 +20,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 
-from flask import Flask, Request, Response, jsonify, render_template, request, redirect, url_for
+from flask import Flask, Request, Response, g, jsonify, render_template, request, redirect, url_for
+from markupsafe import Markup
 from mpd import CommandError, MPDClient, MPDError
 try:
     # Opcional (python-pillow no Termux): reduz os logótipos grandes; sem ele ficam como vêm
@@ -268,7 +269,7 @@ def file_sig(path):
 # As playlists só são lidas outra vez quando algum ficheiro muda: o /estado (a cada
 # 5 segundos, por cada pessoa com a página aberta), a página e cada logótipo
 # precisam dos nomes, e ler tudo de cada vez era o que mais pesava
-_index_cache = {"key": None, "info": {}, "counts": {}}
+_index_cache = {"key": None, "info": {}, "counts": {}, "covers": {}}
 _index_lock = threading.Lock()
 
 def station_index():
@@ -278,12 +279,15 @@ def station_index():
     key = tuple(file_sig(p) for p in paths + [NAMES_FILE])
     with _index_lock:
         if _index_cache["key"] == key:
-            return _index_cache["info"], _index_cache["counts"]
-    info, counts = {}, {}
+            return _index_cache["info"], _index_cache["counts"], _index_cache["covers"]
+    info, counts, covers = {}, {}, {}
     for path in paths + [NAMES_FILE]:
         entries = read_m3u(path)
         if path != NAMES_FILE:
-            counts[os.path.basename(path)[:-len(".m3u")]] = len(entries)
+            name = os.path.basename(path)[:-len(".m3u")]
+            counts[name] = len(entries)
+            # Capa da playlist, como no Spotify: os logótipos das primeiras quatro estações
+            covers[name] = [(logo_key(u), n or "") for u, n, _ in entries[:4]]
         for url, name, logo in entries:
             entry = info.setdefault(url, {"name": None, "logo": None})
             if name:
@@ -291,8 +295,8 @@ def station_index():
             if logo:
                 entry["logo"] = logo
     with _index_lock:
-        _index_cache.update(key=key, info=info, counts=counts)
-    return info, counts
+        _index_cache.update(key=key, info=info, counts=counts, covers=covers)
+    return info, counts, covers
 
 def station_info():
     # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
@@ -815,7 +819,9 @@ def queue_sig(queue):
     # de fora: experimentar uma não recarrega a página
     return hashlib.sha1(",".join(s["id"] for s in listed(queue)).encode()).hexdigest()[:12]
 
-def render_index(results=None, query="", filters=None, theme=None, view=None):
+def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None):
+    # Todas as páginas têm a navegação, o reprodutor e as janelas pequenas (nova
+    # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
         status = c.status()
         current = c.currentsong()
@@ -851,15 +857,15 @@ def render_index(results=None, query="", filters=None, theme=None, view=None):
         stations.sort(key=lambda s: -s["stat"])
     elif list_order in ("name", "-name"):
         stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
-    counts = station_index()[1]
-    playlists = [{"name": p, "count": counts.get(p, 0)} for p in stored_playlists]
+    _, counts, covers = station_index()
+    playlists = [{"name": p, "count": counts.get(p, 0), "cover": covers.get(p, [])} for p in stored_playlists]
     # A estação que falhou, pelo URL na mensagem de erro do MPD ("Failed to decode http://...")
     error = status.get("error", "")
     failed = next((s for s in stations if error and s["file"] in error), None)
     # Para onde vão as rádios de Descobrir; o ✓ dos resultados é dessa playlist
     para = chosen_playlist()
     target_urls = {u for u, _, _ in read_m3u(playlist_path(para))} if para else {s["file"] for s in queue}
-    return render_template("index.html", **player,
+    return render_template(template, **player, page=page, tab=tab,
                                   stations=stations, target_urls=target_urls, para=para, view=view, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
@@ -962,6 +968,16 @@ def asset_url(filename):
             _asset_hashes[filename] = (sig, hashlib.sha1(f.read()).hexdigest()[:10])
     return url_for("static", filename=filename, v=_asset_hashes[filename][1])
 
+@app.template_global()
+def icon(name, cls=""):
+    # Um ícone do static/icons.svg. O endereço do ficheiro (com o hash) só se
+    # calcula uma vez por pedido: a lista pode ter centenas de ícones
+    if "icons_url" not in g:
+        g.icons_url = asset_url("icons.svg")
+    classes = "i " + cls if cls else "i"
+    return Markup(f'<svg class="{html.escape(classes)}" aria-hidden="true" focusable="false">'
+                  f'<use href="{g.icons_url}#{html.escape(name)}"></use></svg>')
+
 COMPRESSIBLE = ("text/html", "application/json", "image/svg+xml", "text/css", "text/javascript", "application/javascript")
 
 @app.after_request
@@ -1023,7 +1039,24 @@ def done():
 
 @app.route("/")
 def index():
-    return render_index()
+    return render_page("home.html", "inicio")
+
+# Descobrir: pesquisa por nome, temas e países são páginas, com os resultados na mesma página
+@app.route("/descobrir")
+def discover():
+    return render_page("discover.html", "descobrir", tab="nome")
+
+@app.route("/descobrir/temas")
+def discover_themes():
+    return render_page("discover.html", "descobrir", tab="temas")
+
+@app.route("/descobrir/paises")
+def discover_countries():
+    return render_page("discover.html", "descobrir", tab="paises")
+
+@app.route("/playlists")
+def playlists_page():
+    return render_page("playlists.html", "playlists")
 
 @app.route("/logo/<key>")
 def logo(key):
@@ -1205,13 +1238,13 @@ def search():
     query = request.args.get("q", "").strip()
     filters = search_filters()
     if not query:
-        return redirect("/#juntar")
+        return render_page("discover.html", "descobrir", filters=filters, tab="nome")
     try:
         results = find_stations(filters, 25, name=query)
     except (OSError, ValueError):
         # Apanhado aqui para não cair no handler de OSError, que culpa o MPD
         return error_page(*API_DOWN)
-    return render_index(results, query, filters)
+    return render_page("discover.html", "descobrir", results, query, filters, tab="nome")
 
 @app.route("/tema")
 def theme():
@@ -1219,9 +1252,9 @@ def theme():
     tag = request.args.get("t", "")
     filters = search_filters()
     if tag and tag not in THEME_LABELS:
-        return redirect("/#temas")
+        return redirect("/descobrir/temas")
     if not tag and not filters["pais"]:
-        return redirect("/#paises")
+        return redirect("/descobrir/paises")
     criteria = {"tag": tag, "tagExact": "true"} if tag else {}
     if tag and filters["pais"]:
         label = f"{THEME_LABELS[tag]} ({COUNTRY_LABELS[filters['pais']]})"
@@ -1231,7 +1264,7 @@ def theme():
         results = find_stations(filters, THEME_LIMIT, **criteria)
     except (OSError, ValueError):
         return error_page(*API_DOWN)
-    return render_index(filters=filters, theme={"tag": tag, "label": label, "results": results})
+    return render_page("discover.html", "descobrir", filters=filters, tab="tema", theme={"tag": tag, "label": label, "results": results})
 
 @app.route("/add_theme", methods=["POST"])
 def add_theme():
@@ -1271,7 +1304,7 @@ def add_theme():
         os.makedirs(PLAYLIST_DIR, exist_ok=True)
         write_m3u(path, entries + new)
         if existed:
-            return redirect("/#playlists")
+            return redirect(view_url(target))
         # Playlist nova: passa a ser a da página principal, como em "Nova playlist".
         # Deixa de haver playlist ativa antes de esvaziar a fila: se o load falhar,
         # a próxima rádio juntada não pode reescrever a playlist antiga com a fila vazia
@@ -1478,9 +1511,11 @@ def undo_remove():
     return back()
 
 def view_url(name, **extra):
-    return "/playlist?" + urllib.parse.urlencode({"nome": name, **extra}) + "#ver"
+    return "/playlist?" + urllib.parse.urlencode({"nome": name, **extra})
 
-EDIT_DONE = {"copiadas": "copiadas para", "movidas": "movidas para", "removidas": "removidas"}
+# Mensagem depois de editar uma playlist: (singular, plural)
+EDIT_DONE = {"copiadas": ("copiada para", "copiadas para"), "movidas": ("movida para", "movidas para"),
+             "removidas": ("removida", "removidas")}
 
 @app.route("/playlist")
 def view_playlist():
@@ -1488,7 +1523,7 @@ def view_playlist():
     name = request.args.get("nome", "").strip()
     path = playlist_path(name)
     if path is None or not os.path.isfile(path):
-        return redirect("/#playlists")
+        return redirect("/playlists")
     info = station_info()
     entries = []
     for url, title, _ in read_m3u(path):
@@ -1499,14 +1534,14 @@ def view_playlist():
     notice = None
     if done in EDIT_DONE:
         count = to_int(request.args.get("n"))
-        notice = f"✓ {count} {'estação' if count == 1 else 'estações'} {EDIT_DONE[done]}"
+        notice = f"✓ {count} {'estação' if count == 1 else 'estações'} {EDIT_DONE[done][count != 1]}"
         if done != "removidas":
             notice += f" «{request.args.get('destino', '')}»"
             skipped = to_int(request.args.get("ja"))
             if skipped:
                 notice += f" ({skipped} já lá {'estava' if skipped == 1 else 'estavam'})"
         notice += "."
-    return render_index(view={"name": name, "entries": entries, "notice": notice,
+    return render_page("playlist.html", "playlists", view={"name": name, "entries": entries, "notice": notice,
                               "playing": name == active_playlist()})
 
 @app.route("/playlist_edit", methods=["POST"])
@@ -1609,7 +1644,7 @@ def delete_playlist():
             pass
         if was_active:
             set_active("")
-    return redirect("/#playlists")
+    return redirect("/playlists")
 
 # Configurações (.env). Lidas como o env_value do start.sh: KEY=valor, a última
 # ocorrência ganha e tiram-se as aspas das pontas

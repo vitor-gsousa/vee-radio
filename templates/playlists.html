@@ -1,0 +1,57 @@
+{% extends "layout.html" %}
+{% import "macros.html" as m with context %}
+{# Playlists: abrir uma (sem a pôr a tocar), tocá-la ou apagá-la #}
+{% block content %}
+    <header class="page-head">
+        <div class="page-head-text">
+            <h1>Playlists</h1>
+            <p class="muted">Toca no nome para ver e editar sem mudar a música.</p>
+        </div>
+        <div class="page-head-actions">
+            <a class="btn primary small" href="#nova">{{ icon("plus") }}<span>Nova playlist</span></a>
+        </div>
+    </header>
+    <div class="rows">
+    {% for pl in playlists %}
+        <div class="row-item playlist-row{% if pl.name == active %} playing{% endif %}">
+            <a class="row-link" href="/playlist?nome={{ pl.name|urlencode }}">
+                {{ m.cover(pl) }}
+                <span class="row-body">
+                    <span class="row-title">{{ pl.name }}</span>
+                    <span class="row-meta">{% if pl.name == active %}<span class="playing-tag">{{ icon("speaker-high") }} A tocar</span> · {% endif %}{{ pl.count }} {{ 'estação' if pl.count == 1 else 'estações' }}</span>
+                </span>
+            </a>
+            {% if pl.name != active %}
+            <form action="/load_playlist" method="post">
+                <input type="hidden" name="playlist_name" value="{{ pl.name }}">
+                <button class="icon-btn play" title="Tocar esta playlist" aria-label="Tocar {{ pl.name }}">{{ icon("play-fill") }}</button>
+            </form>
+            {% endif %}
+            <a class="icon-btn" href="#apagar-{{ loop.index }}" title="Apagar" aria-label="Apagar {{ pl.name }}">{{ icon("trash") }}</a>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            {{ icon("playlist", "empty-icon") }}
+            <h2>Ainda não há playlists</h2>
+            <p class="muted">Cria uma, ou guarda as estações que estão a tocar.</p>
+        </div>
+    {% endfor %}
+    </div>
+{% endblock %}
+
+{% block modals %}
+    {% for pl in playlists %}
+    <div class="modal" id="apagar-{{ loop.index }}">
+        <a class="backdrop" href="#fechar" aria-label="Cancelar"></a>
+        <div class="modal-box">
+            <h2>Apagar «{{ pl.name }}»?</h2>
+            <p class="muted">A playlist e as suas {{ pl.count }} estações deixam de estar guardadas. O que está a tocar não muda.</p>
+            <form action="/delete_playlist" method="post">
+                <input type="hidden" name="playlist_name" value="{{ pl.name }}">
+                <button class="btn danger">{{ icon("trash") }}<span>Apagar</span></button>
+            </form>
+            <a class="btn ghost" href="#fechar">Cancelar</a>
+        </div>
+    </div>
+    {% endfor %}
+{% endblock %}

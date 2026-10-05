@@ -1,6 +1,6 @@
-// Melhora o comando sem o tornar dependente de JavaScript: os formulários e os
-// links continuam a ser os mesmos, mas são enviados com fetch e só se troca o
-// que mudou. Sem este ficheiro, tudo funciona com redirects e :target.
+// Torna o comando mais rápido: os formulários e os links são enviados com fetch
+// e só se troca o que mudou. O servidor continua a fazer o trabalho; aqui só se
+// pede, troca e mostra.
 (function () {
     "use strict";
 

@@ -42,9 +42,9 @@
                 {% if stations %}
                 <button class="btn primary" name="from" value="atuais">Criar com as {{ stations|length }} estações atuais</button>
                 {% endif %}
-                <button class="btn{% if stations %} danger-outline{% else %} primary{% endif %}" name="from" value="vazia">Criar vazia{% if stations %} e parar a música{% endif %}</button>
+                <button class="btn{% if not stations %} primary{% endif %}" name="from" value="vazia">Criar vazia</button>
             </form>
-            <p class="muted small">A nova playlist passa a ser a que está a tocar.{% if stations %} Vazia, a lista fica sem estações até juntares uma rádio; a playlist atual continua guardada.{% endif %}</p>
+            <p class="muted small">A nova playlist passa a ser a do Início, e a rádio que está a tocar continua.{% if stations %} Vazia, a lista fica sem estações até juntares uma rádio; a playlist atual continua guardada.{% endif %}</p>
         </div>
     </div>
 

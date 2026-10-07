@@ -1465,16 +1465,10 @@ def add_theme():
         write_m3u(path, entries + new)
         if existed:
             return redirect(view_url(target))
-        # Playlist nova: passa a ser a da página principal, como em "Nova playlist".
-        # Deixa de haver playlist ativa antes de esvaziar a fila: se o load falhar,
-        # a próxima rádio juntada não pode reescrever a playlist antiga com a fila vazia
-        set_active("")
-        c.clear()
-        set_preview(None)
-        c.load(target)
-        if new:
+        # Playlist nova: passa a ser a da página principal, como em "Nova playlist",
+        # e a rádio que está a tocar continua
+        if not switch_queue(c, target) and new:
             c.play(0)
-        set_active(target)
     return redirect("/")
 
 # Os cartões usam o id da entrada na fila e não a posição: se a lista mudou
@@ -1816,6 +1810,50 @@ def rename_playlist():
             set_active(new)
     return redirect(view_url(new))
 
+def switch_queue(c, name):
+    # Põe na fila a playlist name (que passa a ser a ativa) sem cortar a rádio que
+    # está a tocar: o clear do MPD parava-a. Apagam-se as outras entradas e a que
+    # toca fica: se estiver na playlist nova, passa a ser essa estação (no lugar
+    # dela); se não estiver, fica como rádio a experimentar ("+ Juntar"), até se
+    # tocar outra. Devolve True se ficou uma a tocar
+    # Sem playlist ativa enquanto a fila está a meio: se o load falhar, a próxima
+    # rádio juntada não reescreve a playlist anterior só com o que lá ficou
+    set_active("")
+    status = c.status()
+    current = c.currentsong() if status.get("state") in ("play", "pause") else {}
+    keep_id, url = current.get("id"), current.get("file")
+    if not keep_id:
+        c.clear()
+        set_preview(None)
+    else:
+        preview = read_preview()
+        if not (preview and preview["url"] == url):
+            known = station_info().get(url, {})
+            preview = {"url": url, "name": known.get("name") or current.get("name"), "logo": known.get("logo")}
+        others = [s["id"] for s in c.playlistinfo() if s["id"] != keep_id]
+        if others:
+            c.command_list_ok_begin()
+            for song_id in others:
+                c.deleteid(song_id)
+            c.command_list_end()
+        set_preview(preview)
+    path = playlist_path(name)
+    if read_m3u(path):
+        c.load(name)
+    if keep_id:
+        queue = c.playlistinfo()
+        twin = next((s for s in queue if s["file"] == url and s["id"] != keep_id), None)
+        if twin:
+            # Fica a que já toca, no lugar da cópia que veio com a playlist
+            pos = int(twin["pos"])
+            c.deleteid(twin["id"])
+            c.moveid(keep_id, pos - 1)
+            set_preview(None)
+        elif len(queue) > 1:
+            c.moveid(keep_id, len(queue) - 1)
+    set_active(name)
+    return bool(keep_id)
+
 @app.route("/load_playlist", methods=["POST"])
 def load_playlist():
     name = request.form.get("playlist_name", "").strip()
@@ -1823,16 +1861,10 @@ def load_playlist():
     if path is None or not os.path.isfile(path):
         return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
     with QUEUE_LOCK, mpd_client() as c:
-        # Sem playlist ativa enquanto a fila está vazia: se o load falhar, a próxima
-        # rádio juntada não reescreve a playlist anterior só com ela
-        set_active("")
-        c.clear()
-        set_preview(None)
-        c.load(name)
-        # Uma playlist vazia não tem posição 0 para tocar
-        if c.status().get("playlistlength", "0") != "0":
+        # A rádio que está a tocar continua; parado, começa pela primeira (uma
+        # playlist vazia não tem posição 0 para tocar)
+        if not switch_queue(c, name) and c.status().get("playlistlength", "0") != "0":
             c.play(0)
-        set_active(name)
     return redirect("/")
 
 @app.route("/create_playlist", methods=["POST"])
@@ -1849,10 +1881,9 @@ def create_playlist():
             if request.form.get("from") == "atuais":
                 write_m3u(path, queue_entries(c))
             else:
+                # A rádio que está a tocar continua, como a experimentar
                 write_m3u(path, [])
-                set_active("")
-                c.clear()
-                set_preview(None)
+                switch_queue(c, name)
         set_active(name)
     return redirect("/")
 

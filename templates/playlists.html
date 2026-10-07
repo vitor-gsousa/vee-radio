@@ -24,7 +24,7 @@
             {% if pl.name != active %}
             <form action="/load_playlist" method="post">
                 <input type="hidden" name="playlist_name" value="{{ pl.name }}">
-                <button class="icon-btn play" title="Tocar esta playlist" aria-label="Tocar {{ pl.name }}">{{ icon("play-fill") }}</button>
+                <button class="icon-btn play" title="Passar para esta playlist (a rádio que está a tocar continua)" aria-label="Passar para {{ pl.name }}">{{ icon("play-fill") }}</button>
             </form>
             {% endif %}
             <a class="icon-btn" href="#apagar-{{ loop.index }}" title="Apagar" aria-label="Apagar {{ pl.name }}">{{ icon("trash") }}</a>

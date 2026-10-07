@@ -18,7 +18,7 @@
         {% if not view.playing %}
         <form action="/load_playlist" method="post">
             <input type="hidden" name="playlist_name" value="{{ view.name }}">
-            <button class="play-btn big" title="Tocar esta playlist" aria-label="Tocar esta playlist">{{ icon("play-fill") }}</button>
+            <button class="play-btn big" title="Passar para esta playlist (a rádio que está a tocar continua)" aria-label="Passar para esta playlist">{{ icon("play-fill") }}</button>
         </form>
         {% else %}
         <a class="btn small" href="/">{{ icon("speaker-high") }}<span>A tocar</span></a>

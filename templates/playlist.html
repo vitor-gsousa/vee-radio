@@ -1,66 +1,111 @@
 {% extends "layout.html" %}
 {% import "macros.html" as m with context %}
-{# Uma playlist, sem a pôr a tocar. As caixas de escolha pertencem ao formulário
-   #editar (atributo form), porque cada ▶ é um formulário à parte e os formulários
-   não podem estar uns dentro dos outros #}
+{# Uma playlist em cartões, com procurar e ordenar. A que está a tocar (view.live)
+   vem da fila do MPD e acompanha-a (aviso de erro, anular, recarrega quando a fila
+   muda noutro aparelho); as outras vêm do ficheiro. Sem nome, é a fila por guardar #}
 {% block content %}
     {% set pl = playlists|selectattr("name", "equalto", view.name)|first %}
     {{ m.back("/playlists", "Playlists") }}
     <header class="page-head hero">
         {{ m.cover(pl or {"cover": []}, big=True) }}
         <div class="page-head-text">
-            <p class="eyebrow">Playlist{% if view.playing %} · a tocar{% endif %}</p>
-            <h1>{{ view.name }}</h1>
-            <p class="muted">{{ view.entries|length }} {{ 'estação' if view.entries|length == 1 else 'estações' }}</p>
+            <p class="eyebrow">{% if not view.name %}Lista por guardar{% elif view.live %}Playlist · a tocar{% else %}Playlist{% endif %}</p>
+            <h1>{{ view.name or 'Estações' }}</h1>
+            <p class="muted">{{ cards|length }} {{ 'estação' if cards|length == 1 else 'estações' }}{% if not view.name %} · não estão guardadas{% endif %}</p>
         </div>
     </header>
     <div class="action-bar">
-        {% if not view.playing %}
+        {% if not view.live %}
         <form action="/load_playlist" method="post">
             <input type="hidden" name="playlist_name" value="{{ view.name }}">
             <button class="play-btn big" title="Passar para esta playlist (a rádio que está a tocar continua)" aria-label="Passar para esta playlist">{{ icon("play-fill") }}</button>
         </form>
-        {% else %}
-        <a class="btn small" href="/">{{ icon("speaker-high") }}<span>A tocar</span></a>
         {% endif %}
-        <a class="btn small" href="{% if view.playing %}/descobrir{% else %}/descobrir?para={{ view.name|urlencode }}{% endif %}">{{ icon("plus") }}<span>Juntar rádios</span></a>
+        {% if not view.name and cards %}
+        <a class="btn primary small" href="#nova">{{ icon("floppy-disk") }}<span>Guardar como playlist</span></a>
+        {% endif %}
+        <a class="btn small" href="{% if view.live %}/descobrir{% else %}/descobrir?para={{ view.name|urlencode }}{% endif %}">{{ icon("plus") }}<span>Juntar rádios</span></a>
+        {% if view.name and cards %}
+        <button type="button" class="btn small select-toggle" aria-pressed="false">{{ icon("check-circle") }}<span>Selecionar</span></button>
+        {% endif %}
+        {% if view.name %}
         <a class="icon-btn" href="#renomear" title="Mudar o nome" aria-label="Mudar o nome">{{ icon("pencil-simple") }}</a>
         <a class="icon-btn" href="#apagar" title="Apagar" aria-label="Apagar a playlist">{{ icon("trash") }}</a>
+        {% endif %}
     </div>
     {% if view.notice %}<p class="notice ok">{{ icon("check-circle", "notice-icon") }}<span class="notice-body">{{ view.notice }}</span></p>{% endif %}
 
-    <div class="rows">
-    {% for e in view.entries %}
-        <div class="row-item">
-            <input type="checkbox" name="url" value="{{ e.url }}" form="editar" id="v{{ loop.index }}" aria-label="Escolher {{ e.name }}">
-            <label class="row-link" for="v{{ loop.index }}">
-                <img class="thumb" src="/logo/{{ e.key }}?n={{ e.name|urlencode }}" alt="" loading="lazy">
-                <span class="row-body"><span class="row-title">{{ e.name }}</span></span>
-            </label>
-            <form action="/ouvir" method="post">
-                <input type="hidden" name="url" value="{{ e.url }}">
-                <input type="hidden" name="name" value="{{ e.name }}">
-                <input type="hidden" name="next" value="{{ request.full_path }}">
-                <button class="icon-btn" title="Ouvir sem mudar de playlist" aria-label="Ouvir {{ e.name }}">{{ icon("play-fill") }}</button>
-            </form>
+    {% if view.live and status.error %}
+    {# Com saída: tocar outra, procurar a rádio outra vez (o endereço pode ter mudado) ou removê-la #}
+    <div class="notice danger" id="aviso">
+        {{ icon("warning-circle", "notice-icon") }}
+        <div class="notice-body">
+            <strong>{% if failed %}«{{ failed.name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> O endereço pode ter mudado ou a rádio pode estar em baixo.
+            <div class="small muted">{{ status.error }}</div>
+            <div class="notice-actions">
+                {% if cards %}
+                <form action="/next" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="btn small">{{ icon("skip-forward-fill") }}<span>Tocar a seguinte</span></button></form>
+                {% endif %}
+                {% if failed %}
+                <a class="btn small" href="/search?q={{ failed.name|urlencode }}">{{ icon("magnifying-glass") }}<span>Procurar outra vez</span></a>
+                <form action="/remove/{{ failed.id }}" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="btn small danger">{{ icon("trash") }}<span>Remover</span></button></form>
+                {% endif %}
+            </div>
         </div>
-    {% else %}
+    </div>
+    {% endif %}
+
+    {# Depois do ✕: anular durante UNDO_SECONDS. O script esconde-a quando o tempo acaba #}
+    {% if view.live and removed %}
+    <div class="notice undo" data-left="{{ removed.left }}">
+        {{ icon("trash", "notice-icon") }}
+        <span class="notice-body">«{{ removed.name }}» saiu da lista.</span>
+        <form action="/anular" method="post">
+            <input type="hidden" name="next" value="{{ list_url }}">
+            <button class="btn small">{{ icon("arrow-counter-clockwise") }}<span>Anular</span></button>
+        </form>
+    </div>
+    {% endif %}
+
+    <section{% if view.live %} id="estacoes" data-queue="{{ queue_sig }}"{% endif %}>
+        {% if cards|length > 1 or list_filter %}
+        {# Sem JavaScript filtra com Enter e ordena com o OK; com ele, filtra enquanto se escreve #}
+        <form class="list-tools" action="/playlist" method="get" role="search">
+            {% if view.name %}<input type="hidden" name="nome" value="{{ view.name }}">{% endif %}
+            {{ m.search_box("filtro", list_filter, "Procurar nesta lista", view.url ~ (("&" if "?" in view.url else "?") ~ "ordenar=" ~ list_order if list_order else "")) }}
+            {{ m.order_select("ordenar", list_orders, list_order) }}
+            <noscript><button class="btn">OK</button></noscript>
+        </form>
+        {% endif %}
+        {# A ordenação e o filtro só mudam o que se vê; o script mostra ou esconde a nota enquanto se escreve #}
+        {% if view.live %}
+        <p class="hint order-note" id="nota-ordem"{% if not (list_order or list_filter) %} hidden{% endif %}>{{ icon("skip-back-fill") }}{{ icon("skip-forward-fill") }} seguem a ordem da playlist, incluindo as estações que o filtro esconde.</p>
+        {% endif %}
+        <div class="stations">
+        {% for s in cards %}{{ m.station_tile(s, view, list_url, list_order) }}{% endfor %}
+        {% if cards %}
+            <p class="muted empty" id="sem-resultados"{% if cards|rejectattr("hidden")|list %} hidden{% endif %}>Nenhuma estação desta lista tem esse nome.</p>
+        {% endif %}
+        </div>
+        {% if not cards %}
         <div class="empty-state">
             {{ icon("radio", "empty-icon") }}
-            <h2>Esta playlist ainda não tem estações</h2>
-            <a class="btn primary" href="{% if view.playing %}/descobrir{% else %}/descobrir?para={{ view.name|urlencode }}{% endif %}">{{ icon("compass") }}<span>Descobrir rádios</span></a>
+            <h2>Ainda não há estações</h2>
+            <p class="muted">Procura rádios por nome, tema ou país e junta as que gostares.</p>
+            <a class="btn primary" href="{% if view.name and not view.live %}/descobrir?para={{ view.name|urlencode }}{% else %}/descobrir{% endif %}">{{ icon("compass") }}<span>Descobrir rádios</span></a>
         </div>
-    {% endfor %}
-    </div>
+        {% endif %}
+    </section>
 
-    {% if view.entries %}
-    {# Com JavaScript é uma barra por cima do reprodutor, que só aparece com estações
-       escolhidas e diz quantas são; sem ele fica aqui, no fim da lista #}
+    {% if view.name and cards %}
+    {# Barra do modo Selecionar, por cima do reprodutor: aparece com o botão
+       Selecionar e diz quantas estações estão escolhidas #}
     <form action="/playlist_edit" method="post" id="editar" class="panel edit-panel">
         <input type="hidden" name="nome" value="{{ view.name }}">
+        <input type="hidden" name="next" value="{{ list_url }}">
         <div class="edit-head">
-            <p class="field edit-count" aria-live="polite">Com as estações escolhidas</p>
-            <button type="button" class="icon-btn edit-clear" title="Desmarcar todas" aria-label="Desmarcar todas">{{ icon("x") }}</button>
+            <p class="field edit-count" aria-live="polite">Toca nas estações para as escolher</p>
+            <button type="button" class="icon-btn edit-clear" title="Sair da seleção" aria-label="Sair da seleção">{{ icon("x") }}</button>
         </div>
         {% set others = playlists|rejectattr("name", "equalto", view.name)|list %}
         {% if others %}
@@ -73,13 +118,16 @@
             <button class="btn small danger-outline" name="acao" value="remover">{{ icon("trash") }}<span>Remover</span></button>
         </div>
         {% else %}
-        <button class="btn small danger-outline" name="acao" value="remover">{{ icon("trash") }}<span>Remover</span></button>
+        <div class="button-row">
+            <button class="btn small danger-outline" name="acao" value="remover">{{ icon("trash") }}<span>Remover</span></button>
+        </div>
         {% endif %}
     </form>
     {% endif %}
 {% endblock %}
 
 {% block modals %}
+    {% if view.name %}
     <div class="modal" id="renomear">
         <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
         <div class="modal-box">
@@ -96,7 +144,7 @@
         <a class="backdrop" href="#fechar" aria-label="Cancelar"></a>
         <div class="modal-box">
             <h2>Apagar «{{ view.name }}»?</h2>
-            <p class="muted">A playlist e as suas {{ view.entries|length }} estações deixam de estar guardadas. O que está a tocar não muda.</p>
+            <p class="muted">A playlist e as suas {{ cards|length }} estações deixam de estar guardadas. O que está a tocar não muda.</p>
             <form action="/delete_playlist" method="post">
                 <input type="hidden" name="playlist_name" value="{{ view.name }}">
                 <button class="btn danger">{{ icon("trash") }}<span>Apagar</span></button>
@@ -104,4 +152,5 @@
             <a class="btn ghost" href="#fechar">Cancelar</a>
         </div>
     </div>
+    {% endif %}
 {% endblock %}

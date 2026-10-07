@@ -48,15 +48,15 @@
         if (target && target.classList.contains("modal")) target.classList.add("open");
     }
 
-    // A lista de estações com o filtro e a ordenação que estão no URL
+    // A página da playlist com o filtro e a ordenação que estão no URL
     function listUrl() {
         var current = new URLSearchParams(location.search);
         var params = new URLSearchParams();
-        ["filtro", "ordenar"].forEach(function (key) {
+        ["nome", "filtro", "ordenar"].forEach(function (key) {
             if (current.get(key)) params.set(key, current.get(key));
         });
         var query = params.toString();
-        return "/" + (query ? "?" + query : "");
+        return location.pathname + (query ? "?" + query : "");
     }
 
     function openModal() {
@@ -269,7 +269,7 @@
         if (tile && tile.classList.contains("pending")) return;
         // O "next" dos cartões foi escrito com o URL de quando a página foi feita;
         // o filtro escrito entretanto só está no URL atual
-        var next = (tile || form.closest(".undo")) && form.querySelector('input[name="next"]');
+        var next = (tile || form.closest(".undo") || form.id === "editar") && form.querySelector('input[name="next"]');
         if (next) next.value = listUrl();
         // "+ Juntar" no reprodutor volta à página que está aberta (por exemplo, aos
         // resultados, para mostrar o ✓), e não sempre a /
@@ -339,12 +339,15 @@
         updateTitle(state.station, state.playing);
         if (state.notice) toast(state.notice.text, state.notice.ok);
         // A lista de estações mudou noutro aparelho, ou apareceu ou desapareceu o
-        // aviso de erro: recarrega a página, mas nunca com uma janela aberta. Só no
-        // Início, que é onde estão a lista e o aviso
+        // aviso de erro: recarrega a página, mas nunca com uma janela aberta nem a
+        // meio de uma seleção. Só na página da playlist que está a tocar
         var list = document.getElementById("estacoes");
         var changed = list && (list.dataset.queue !== String(state.queue) ||
             !!state.error !== !!document.getElementById("aviso"));
-        if (changed && !openModal() && !busy) load(location.pathname + location.search + location.hash, false);
+        // No Início, o cartão "A tocar agora" é da página: muda-se quando a estação muda
+        var panel = document.getElementById("painel");
+        if (panel && panel.dataset.now !== (state.id == null ? "" : String(state.id))) changed = true;
+        if (changed && !openModal() && !busy && !selecting()) load(location.pathname + location.search + location.hash, false);
         return true;
     }
 
@@ -402,15 +405,14 @@
         input.focus();
     });
 
-    // O ✕ da barra das estações escolhidas desmarca todas e esconde-a
+    // Selecionar liga e desliga o modo; o ✕ da barra sai dele e desmarca tudo
     document.addEventListener("click", function (e) {
-        if (!e.target.closest(".edit-clear")) return;
-        document.querySelectorAll('input[form="editar"]:checked').forEach(function (box) { box.checked = false; });
-        updateSelection();
+        if (e.target.closest(".select-toggle")) setSelecting(!selecting());
+        else if (e.target.closest(".edit-clear")) setSelecting(false);
     });
 
-    // "Mostrar na lista" no reprodutor aberto: no Início fecha-o, desliza até ao
-    // cartão e acende-o; noutra página vai ao Início (e o swap mostra o cartão)
+    // "Mostrar na lista" no reprodutor aberto: na página da lista que está a tocar
+    // fecha-o, desliza até ao cartão e acende-o; noutra página vai lá (e o swap mostra o cartão)
     document.addEventListener("click", function (e) {
         var go = e.target.closest("a.show-in-list");
         var tile = go && document.getElementById(go.getAttribute("href").split("#")[1]);
@@ -436,14 +438,33 @@
         load(url.pathname + url.search + url.hash, true);
     });
 
-    // Página de uma playlist: a barra "Com as estações escolhidas" só aparece com
-    // caixas marcadas e diz quantas são
+    // Página de uma playlist, modo Selecionar: tocar num cartão escolhe-o, e a barra
+    // por cima do reprodutor diz quantos estão escolhidos e o que fazer com eles
+    function selecting() {
+        var main = document.querySelector(".main");
+        return !!(main && main.classList.contains("selecting"));
+    }
+
+    function setSelecting(on) {
+        var main = document.querySelector(".main");
+        if (!main || !document.getElementById("editar")) return;
+        main.classList.toggle("selecting", on);
+        if (!on) document.querySelectorAll('input[form="editar"]:checked').forEach(function (box) { box.checked = false; });
+        var toggle = document.querySelector(".select-toggle");
+        if (toggle) {
+            toggle.setAttribute("aria-pressed", on ? "true" : "false");
+            toggle.querySelector("span").textContent = on ? "Cancelar" : "Selecionar";
+        }
+        updateSelection();
+    }
+
     function updateSelection() {
         var panel = document.getElementById("editar");
         if (!panel) return;
         var n = document.querySelectorAll('input[form="editar"]:checked').length;
-        panel.classList.toggle("has-sel", n > 0);
-        if (n) panel.querySelector(".edit-count").textContent = n + (n === 1 ? " estação escolhida" : " estações escolhidas");
+        panel.querySelector(".edit-count").textContent = n === 0 ? "Toca nas estações para as escolher" :
+            n + (n === 1 ? " estação escolhida" : " estações escolhidas");
+        panel.querySelectorAll("button[name=acao]").forEach(function (b) { b.disabled = n === 0; });
     }
 
     document.addEventListener("input", function (e) {

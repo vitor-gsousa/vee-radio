@@ -108,7 +108,7 @@
             {{ controls(big=True) }}
             {{ volume_bar() }}
             {% if tile_id %}
-            <a class="btn ghost show-in-list" href="/#e{{ tile_id }}">{{ icon("list-magnifying-glass") }}<span>Mostrar na lista</span></a>
+            <a class="btn ghost show-in-list" href="{{ list_href }}#e{{ tile_id }}">{{ icon("list-magnifying-glass") }}<span>Mostrar na lista</span></a>
             {% endif %}
         </div>
     </div>

@@ -295,20 +295,64 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .edit-head { display: flex; align-items: center; gap: 8px; }
 .edit-head .field { flex: 1; margin: 0; }
 .edit-clear { display: none; }
-.row-item:has(input[form="editar"]:checked) { background: var(--surface-2); }
-/* Com JavaScript: barra por cima do reprodutor, só com estações escolhidas */
+/* Modo Selecionar (classe selecting no .main, posta pelo script): cada cartão fica
+   coberto por uma caixa, e tocar nele escolhe-o em vez de o pôr a tocar */
+.tile-check { display: none; }
+.selecting .tile-check {
+    position: absolute; inset: 0; z-index: 3; display: block; padding: 10px; border-radius: var(--radius); cursor: pointer;
+}
+.selecting .tile-check input { position: relative; z-index: 1; width: 22px; height: 22px; }
+.selecting .tile-check:has(input:checked) { background: rgba(232, 110, 84, 0.16); box-shadow: inset 0 0 0 2px var(--accent-fg); }
+.selecting .tile-del, .selecting .tile-fab, .selecting .badge { display: none; }
+.select-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+/* Com JavaScript: barra por cima do reprodutor, só no modo Selecionar */
 .js .edit-panel {
     position: fixed; left: 8px; right: 8px; z-index: 19; margin: 0;
     bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe) + 14px);
     background: #24242c; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
     visibility: hidden; opacity: 0; transform: translateY(12px); transition: opacity 0.15s, transform 0.15s, visibility 0.15s;
 }
-.js .edit-panel.has-sel { visibility: visible; opacity: 1; transform: none; }
+.js .selecting .edit-panel { visibility: visible; opacity: 1; transform: none; }
+.edit-panel button:disabled { opacity: 0.45; cursor: default; }
 .js .edit-head .field { color: var(--text); font-size: 15px; }
 .js .edit-clear { display: inline-flex; }
 .js .edit-panel .button-row .btn { flex: 1 1 auto; justify-content: center; }
 /* A barra tapa o fim da lista: dá-se esse espaço a mais */
-.js .main:has(.edit-panel.has-sel) { padding-bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe) + 220px); }
+.js .main.selecting { padding-bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe) + 220px); }
+
+/* Início: o que está a tocar e prateleiras que deslizam para o lado */
+.notice-link { color: inherit; text-decoration: none; }
+.now-card {
+    display: flex; flex-direction: column; gap: 14px; margin-bottom: 26px; padding: 16px; border-radius: 16px;
+    background: linear-gradient(135deg, rgba(145, 45, 25, 0.55), var(--surface) 70%);
+}
+.now-main { display: flex; align-items: center; gap: 16px; min-width: 0; color: inherit; text-decoration: none; }
+.now-logo { width: 96px; height: 96px; flex: none; border-radius: 12px; object-fit: contain; background: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.now-empty { display: grid; place-items: center; background: var(--surface-3); color: var(--dim); }
+.now-empty .i { width: 44px; height: 44px; }
+.now-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.now-station { font-size: 22px; font-weight: 800; line-height: 1.2; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.now-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.now-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.now-actions form { margin: 0; }
+.shelf-section { margin-bottom: 26px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.section-head h2 { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
+.shelf {
+    display: grid; grid-auto-flow: column; grid-auto-columns: 128px; gap: 12px; overflow-x: auto;
+    margin: 0 -16px; padding: 2px 16px 8px; scroll-snap-type: x mandatory; scrollbar-width: none;
+}
+.shelf::-webkit-scrollbar { display: none; }
+.mini-card, .pl-card { scroll-snap-align: start; margin: 0; min-width: 0; }
+.mini-card button, .pl-card {
+    display: flex; flex-direction: column; gap: 6px; width: 100%; padding: 8px; border: 0; border-radius: var(--radius);
+    background: transparent; color: var(--text); font: inherit; text-align: left; text-decoration: none; cursor: pointer;
+}
+.mini-card button:hover, .pl-card:hover { background: var(--surface-2); }
+.pl-card .cover.big { width: 100%; height: auto; aspect-ratio: 1; }
+.pl-card.playing .tile-name { color: var(--accent-fg); }
+.mini-card .tile-name, .pl-card .tile-name { min-height: 0; }
+.section-sub { margin: -6px 0 10px; }
 
 /* Capa de uma playlist: um logótipo, ou quatro em grelha */
 .cover { width: 52px; height: 52px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: 8px; background: var(--surface-3); color: var(--dim); }
@@ -512,7 +556,11 @@ body.busy::before {
     .sheet .modal-box { border-radius: 20px; border-bottom: 1px solid var(--line); padding-bottom: 22px; }
     .toast { bottom: calc(var(--bar-h) + var(--safe) + 20px); left: calc(50% + var(--side-w) / 2); }
     .js .edit-panel { left: calc(var(--side-w) + 36px); right: 36px; bottom: calc(var(--bar-h) + var(--safe) + 14px); max-width: 900px; }
-    .js .main:has(.edit-panel.has-sel) { padding-bottom: calc(var(--bar-h) + var(--safe) + 200px); }
+    .js .main.selecting { padding-bottom: calc(var(--bar-h) + var(--safe) + 200px); }
+    .shelf { grid-auto-columns: 160px; margin: 0; padding: 2px 0 8px; }
+    .now-card { flex-direction: row; align-items: center; justify-content: space-between; padding: 22px; }
+    .now-logo { width: 120px; height: 120px; }
+    .now-station { font-size: 28px; }
     .tile-fab { display: flex; }
     .tile-play:hover .tile-fab { opacity: 1; transform: none; }
     .tile.current .tile-fab { display: none; }

@@ -32,7 +32,7 @@
         <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
         {% endfor %}
         {# Por omissão vão para a playlist escolhida em "Juntar a" (ou a que está a tocar).
-           A playlist nova é escolha explícita, porque passa a ser a do Início no lugar da atual #}
+           A playlist nova é escolha explícita, porque passa a ser a que toca no lugar da atual #}
         <label class="field" for="theme-target">Juntar todas a</label>
         <div class="inline-form">
             <select name="target" id="theme-target">
@@ -43,7 +43,7 @@
                 {% if theme.label in existing %}
                 <option value="{{ theme.label }}"{% if para == theme.label %} selected{% endif %}>{{ theme.label }}</option>
                 {% else %}
-                <option value="">Nova playlist «{{ theme.label }}» (passa para o Início)</option>
+                <option value="">Nova playlist «{{ theme.label }}» (passa a ser a que toca)</option>
                 {% endif %}
                 {% endif %}
                 {% for pl in playlists if pl.name != theme.label and pl.name != active %}

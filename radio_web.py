@@ -552,6 +552,21 @@ def station_details(url):
         threading.Thread(target=refresh, daemon=True).start()
     return entry
 
+def refresh_stats_later(urls):
+    # O mesmo para várias estações de uma vez (os destaques do Início); só corre
+    # uma destas atualizações de cada vez
+    with _refreshing_lock:
+        if "*" in _refreshing:
+            return
+        _refreshing.add("*")
+    def refresh():
+        try:
+            station_stats(urls)
+        finally:
+            with _refreshing_lock:
+                _refreshing.discard("*")
+    threading.Thread(target=refresh, daemon=True).start()
+
 @app.template_filter("compact")
 def compact(n):
     # 14908 -> "14,9 mil"
@@ -635,6 +650,39 @@ def read_removed():
     if time.time() - to_int(removed.get("t")) >= UNDO_SECONDS or removed.get("playlist") != active_playlist():
         return None
     return removed
+
+# Ouvidas recentemente (no Início): a mais recente primeiro, sem repetidas. Uma
+# estação só conta depois de HISTORY_MIN_SECONDS a tocar, para não encher a lista
+# ao saltar estações com ⏭
+HISTORY_FILE = os.path.expanduser("~/.config/vee-radio/historico.json")
+HISTORY_SIZE = 20
+HISTORY_MIN_SECONDS = 20
+HISTORY_LOCK = threading.Lock()
+_history_last = None
+
+def read_history():
+    # [{"url", "name", "logo", "t"}]
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as f:
+            history = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return []
+    if not isinstance(history, list):
+        return []
+    return [h for h in history if isinstance(h, dict) and safe_url(h.get("url") or "")]
+
+def note_played(url, name, logo):
+    # Chamado a cada /estado: só lê e escreve o ficheiro quando a estação muda
+    global _history_last
+    if url == _history_last:
+        return
+    with HISTORY_LOCK:
+        history = read_history()
+        if not (history and history[0]["url"] == url):
+            entry = {"url": url, "name": name or None, "logo": logo if LOGO_URL_RE.match(logo or "") else None,
+                     "t": time.time()}
+            write_state(HISTORY_FILE, [entry] + [h for h in history if h["url"] != url][:HISTORY_SIZE - 1])
+        _history_last = url
 
 def removed_context():
     # A faixa "Anular" da página, com os segundos que faltam para o script a esconder
@@ -793,6 +841,14 @@ def player_context(status, current, info):
         alts = station_versions(current["file"], station, details.get("countrycode"))
         if len(alts) > 1:
             versions = [{**v, "current": v["url"] == current["file"]} for v in alts]
+    if playing and current.get("file"):
+        try:
+            elapsed = float(status.get("elapsed") or 0)
+        except ValueError:
+            elapsed = 0
+        if elapsed >= HISTORY_MIN_SECONDS:
+            note_played(current["file"], station,
+                        info.get(current["file"], {}).get("logo") or (preview or {}).get("logo"))
     return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
             "details": details, "kbps": kbps, "versions": versions,
             "voted": time.time() - (details.get("voted_at") or 0) < VOTE_COOLDOWN,
@@ -802,7 +858,7 @@ def player_context(status, current, info):
             "current_id": current.get("id") if playing else None,
             # Cartão da estação atual, mesmo parada; a que se experimenta não tem
             "tile_id": current.get("id") if current.get("file") and not preview else None,
-            "preview": preview, "active": active_playlist(),
+            "preview": preview, "active": active_playlist(), "list_href": queue_url(),
             "volume": volume, "has_stations": status.get("playlistlength", "0") != "0"}
 
 def with_sig(player):
@@ -828,7 +884,34 @@ def queue_sig(queue):
     # de fora: experimentar uma não recarrega a página
     return hashlib.sha1(",".join(s["id"] for s in listed(queue)).encode()).hexdigest()[:12]
 
-def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None):
+def station_cards(items, current_id):
+    # Cartões de uma lista de estações ({"id", "file", "name"}; id None fora da
+    # fila), com o filtro e a ordenação do URL. As escondidas pelo filtro vão na
+    # página com hidden, para o script as mostrar enquanto se escreve
+    list_filter = request.args.get("filtro", "").strip()
+    list_order = request.args.get("ordenar", "")
+    if list_order not in dict(LIST_ORDERS):
+        list_order = ""
+    wanted = plain_text(list_filter)
+    cards = []
+    for s in items:
+        # O nome já normalizado vai na página (data-plain), para o filtro do script
+        # não ter de o normalizar de novo a cada tecla
+        plain = plain_text(s["name"])
+        cards.append({**s, "key": logo_key(s["file"]), "plain": plain, "hidden": wanted not in plain,
+                      "current": s["id"] is not None and s["id"] == current_id})
+    if list_order in POPULAR_ORDERS:
+        stats = station_stats([c["file"] for c in cards])
+        for c in cards:
+            c["stat"] = stats.get(c["file"], {}).get(list_order, 0)
+        # sort estável: em caso de empate fica a ordem da playlist
+        cards.sort(key=lambda c: -c["stat"])
+    elif list_order in ("name", "-name"):
+        cards.sort(key=lambda c: sort_key(c["name"]), reverse=list_order == "-name")
+    return cards, list_filter, list_order
+
+def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None,
+                dashboard=None):
     # Todas as páginas têm a navegação, o reprodutor e as janelas pequenas (nova
     # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
@@ -842,32 +925,19 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
     info = station_info()
     display_name = display_namer(info)
     player = with_sig(player_context(status, current, info))
-    # Filtro e ordenação da lista: as estações escondidas vão na página com hidden,
-    # para o script as poder mostrar enquanto se escreve, sem pedir outra vez
-    list_filter = request.args.get("filtro", "").strip()
-    list_order = request.args.get("ordenar", "")
-    if list_order not in dict(LIST_ORDERS):
-        list_order = ""
-    # Para onde voltam os cartões depois de tocar ou remover: a lista com o mesmo
-    # filtro, e nunca /search ou /tema, que voltariam a pedir tudo à API
-    list_params = {k: v for k, v in (("filtro", list_filter), ("ordenar", list_order)) if v}
-    list_url = "/" + ("?" + urllib.parse.urlencode(list_params) if list_params else "")
-    wanted = plain_text(list_filter)
-    stations = [{"pos": s["pos"], "id": s["id"], "file": s["file"], "name": display_name(s), "key": logo_key(s["file"]),
-                 "current": s["id"] == player["current_id"]} for s in queue]
-    for s in stations:
-        # O nome já normalizado vai na página (data-plain), para o filtro do script
-        # não ter de o normalizar de novo a cada tecla
-        s["plain"] = plain_text(s["name"])
-        s["hidden"] = wanted not in s["plain"]
-    if list_order in POPULAR_ORDERS:
-        stats = station_stats([s["file"] for s in stations])
-        for s in stations:
-            s["stat"] = stats.get(s["file"], {}).get(list_order, 0)
-        # sort estável: em caso de empate fica a ordem da playlist
-        stations.sort(key=lambda s: -s["stat"])
-    elif list_order in ("name", "-name"):
-        stations.sort(key=lambda s: sort_key(s["name"]), reverse=list_order == "-name")
+    # As estações da fila (a lista que está a tocar), na ordem da playlist
+    stations = [{"id": s["id"], "file": s["file"], "name": display_name(s)} for s in queue]
+    # A página de uma playlist: cartões com filtro e ordenação. Na que está a tocar
+    # vêm da fila (com o id do MPD); nas outras, do ficheiro
+    cards, list_filter, list_order, list_url = [], "", "", "/"
+    if view is not None:
+        cards, list_filter, list_order = station_cards(stations if view["live"] else view["entries"],
+                                                       player["current_id"] if view["live"] else None)
+        # Para onde voltam os cartões depois de tocar ou remover: esta página com o
+        # mesmo filtro, e nunca /search ou /tema, que voltariam a pedir tudo à API
+        list_params = {k: v for k, v in (("filtro", list_filter), ("ordenar", list_order)) if v}
+        list_url = view["url"] + (("&" if "?" in view["url"] else "?") + urllib.parse.urlencode(list_params)
+                                  if list_params else "")
     _, counts, covers = station_index()
     playlists = [{"name": p, "count": counts.get(p, 0), "cover": covers.get(p, [])} for p in stored_playlists]
     # A estação que falhou, pelo URL na mensagem de erro do MPD ("Failed to decode http://...")
@@ -877,13 +947,13 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
     para = chosen_playlist()
     target_urls = {u for u, _, _ in read_m3u(playlist_path(para))} if para else {s["file"] for s in queue}
     return render_template(template, **player, page=page, tab=tab,
-                                  stations=stations, target_urls=target_urls, para=para, view=view, queue_sig=queue_sig(queue),
+                                  stations=stations, cards=cards, target_urls=target_urls, para=para, view=view, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
                                   playlists=playlists,
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
-                                  bitrates=BITRATES, theme=theme,
+                                  bitrates=BITRATES, theme=theme, dashboard=dashboard,
                                   failed=failed, removed=removed_context(),
                                   config=config_context() if can_configure() else None)
 
@@ -1052,9 +1122,31 @@ def done():
     # Os botões do reprodutor devolvem o estado ao script, em vez da página inteira
     return estado() if from_script() else back()
 
+HIGHLIGHTS = 6
+
 @app.route("/")
 def index():
-    return render_page("home.html", "inicio")
+    # Início: o que está a tocar, as playlists, as ouvidas recentemente e os
+    # destaques das rádios guardadas. Os destaques usam só os números do
+    # radio-browser já guardados (stats.json): o Início não espera pela API
+    info = station_info()
+    recent = [{**h, "name": info.get(h["url"], {}).get("name") or h.get("name") or h["url"],
+               "key": logo_key(h["url"])} for h in read_history()[:12]]
+    stats = load_stats()
+    mine = [(url, stats[url]) for url in info if url in stats]
+    # Os números em falta ou com mais de um dia vêm em segundo plano: aparecem na visita seguinte
+    now = time.time()
+    stale = [url for url in info if stats_stale(stats.get(url, {}), now)]
+    if stale:
+        refresh_stats_later(stale)
+
+    def top(field, positive=False):
+        ranked = sorted(((e.get(field) or 0, url) for url, e in mine), reverse=True)
+        return [{"url": url, "name": info[url].get("name") or url, "logo": info[url].get("logo"),
+                 "key": logo_key(url), "stat": n} for n, url in ranked[:HIGHLIGHTS] if n > 0 or not positive]
+
+    return render_page("home.html", "inicio", dashboard={
+        "recent": recent, "popular": top("clickcount", True), "trending": top("clicktrend", True)})
 
 # Descobrir: pesquisa por nome, temas e países são páginas, com os resultados na mesma página
 @app.route("/descobrir")
@@ -1460,16 +1552,16 @@ def add_theme():
                 c.command_list_end()
             write_m3u(path, entries + new)
             sync_active(c)
-            return redirect("/")
+            return redirect(view_url(target))
         os.makedirs(PLAYLIST_DIR, exist_ok=True)
         write_m3u(path, entries + new)
         if existed:
             return redirect(view_url(target))
-        # Playlist nova: passa a ser a da página principal, como em "Nova playlist",
+        # Playlist nova: passa a ser a que toca, como em "Nova playlist",
         # e a rádio que está a tocar continua
         if not switch_queue(c, target) and new:
             c.play(0)
-    return redirect("/")
+    return redirect(view_url(target))
 
 # Os cartões usam o id da entrada na fila e não a posição: se a lista mudou
 # noutro aparelho depois de a página ser feita, a posição já é de outra estação
@@ -1737,18 +1829,30 @@ def view_url(name, **extra):
 EDIT_DONE = {"copiadas": ("copiada para", "copiadas para"), "movidas": ("movida para", "movidas para"),
              "removidas": ("removida", "removidas")}
 
+def queue_url():
+    # A página da lista que está a tocar: a playlist ativa, ou a fila por guardar
+    name = active_playlist()
+    return view_url(name) if name else "/playlist"
+
 @app.route("/playlist")
 def view_playlist():
-    # Ver e editar uma playlist sem a pôr a tocar: as estações vêm do ficheiro
+    # Uma playlist em cartões. A que está a tocar vem da fila do MPD; as outras, do
+    # ficheiro, e tocar num cartão põe-nas a tocar a partir dessa estação.
+    # Sem nome: a lista que está a tocar, ou a fila quando não está guardada
     name = request.args.get("nome", "").strip()
-    path = playlist_path(name)
-    if path is None or not os.path.isfile(path):
-        return redirect("/playlists")
-    info = station_info()
+    active = active_playlist()
+    if not name and active:
+        keep = {k: v for k, v in request.args.items() if k in ("filtro", "ordenar")}
+        return redirect(view_url(active, **keep))
     entries = []
-    for url, title, _ in read_m3u(path):
-        title = title or info.get(url, {}).get("name") or url
-        entries.append({"url": url, "name": title, "key": logo_key(url)})
+    if name:
+        path = playlist_path(name)
+        if path is None or not os.path.isfile(path):
+            return redirect("/playlists")
+        if name != active:
+            info = station_info()
+            entries = [{"id": None, "file": url, "name": title or info.get(url, {}).get("name") or url}
+                       for url, title, _ in read_m3u(path)]
     # Mensagem depois de copiar, mover ou remover (o redirect traz o que se fez)
     done = request.args.get("feito", "")
     notice = None
@@ -1761,8 +1865,28 @@ def view_playlist():
             if skipped:
                 notice += f" ({skipped} já lá {'estava' if skipped == 1 else 'estavam'})"
         notice += "."
+    live = name == active
     return render_page("playlist.html", "playlists", view={"name": name, "entries": entries, "notice": notice,
-                              "playing": name == active_playlist()})
+                       "live": live, "url": view_url(name) if name else "/playlist"})
+
+@app.route("/tocar_em", methods=["POST"])
+def play_in():
+    # Cartão de uma playlist que não está a tocar: passa a tocar essa playlist, a
+    # começar nessa estação (como no Spotify); ⏮ ⏭ passam a seguir esta playlist
+    name = request.form.get("nome", "").strip()
+    url = request.form.get("url", "").strip()
+    path = playlist_path(name)
+    if path is None or not os.path.isfile(path):
+        return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
+    with QUEUE_LOCK, mpd_client() as c:
+        if name != active_playlist():
+            switch_queue(c, name)
+        song = next((s for s in listed(c.playlistinfo()) if s["file"] == url), None)
+        # A que já está a tocar não recomeça
+        if song and not (c.status().get("state") == "play" and c.currentsong().get("id") == song["id"]):
+            c.playid(song["id"])
+            drop_preview(c, keep_url=url)
+    return back()
 
 @app.route("/playlist_edit", methods=["POST"])
 def edit_playlist():
@@ -1788,7 +1912,10 @@ def edit_playlist():
         if action in ("mover", "remover"):
             remove_from_playlist(c, name, urls)
     extra["feito"] = {"copiar": "copiadas", "mover": "movidas", "remover": "removidas"}[action]
-    return redirect(view_url(name, **extra))
+    # O ✕ de um cartão volta à lista com o mesmo filtro e ordenação
+    keep = {k: v for k, v in urllib.parse.parse_qsl(urllib.parse.urlsplit(request.form.get("next", "")).query)
+            if k in ("filtro", "ordenar")}
+    return redirect(view_url(name, **keep, **extra))
 
 @app.route("/rename_playlist", methods=["POST"])
 def rename_playlist():
@@ -1865,7 +1992,7 @@ def load_playlist():
         # playlist vazia não tem posição 0 para tocar)
         if not switch_queue(c, name) and c.status().get("playlistlength", "0") != "0":
             c.play(0)
-    return redirect("/")
+    return redirect(view_url(name))
 
 @app.route("/create_playlist", methods=["POST"])
 def create_playlist():
@@ -1885,7 +2012,7 @@ def create_playlist():
                 write_m3u(path, [])
                 switch_queue(c, name)
         set_active(name)
-    return redirect("/")
+    return redirect(view_url(name))
 
 @app.route("/delete_playlist", methods=["POST"])
 def delete_playlist():

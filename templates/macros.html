@@ -120,3 +120,56 @@
 {% macro back(href, label) %}
     <a class="back-btn" href="{{ href }}">{{ icon("caret-left") }}<span>{{ label }}</span></a>
 {% endmacro %}
+
+{# Cartão de uma estação na página de uma playlist. Na que está a tocar (view.live)
+   toca e remove pelo id da fila do MPD; nas outras, tocar põe a playlist a tocar
+   a partir desta estação (/tocar_em) e o ✕ tira-a do ficheiro. A caixa só aparece
+   no modo Selecionar e pertence ao formulário #editar (atributo form) #}
+{% macro station_tile(s, view, list_url, list_order) %}
+            <div class="tile{% if s.current %} current{% endif %}" id="{% if s.id %}e{{ s.id }}{% else %}u{{ s.key }}{% endif %}"{% if s.id %} data-id="{{ s.id }}"{% endif %} data-plain="{{ s.plain }}"{% if s.hidden %} hidden{% endif %}>
+                {% if view.live %}
+                <form action="/play_id/{{ s.id }}" method="post">
+                {% else %}
+                <form action="/tocar_em" method="post">
+                    <input type="hidden" name="nome" value="{{ view.name }}">
+                    <input type="hidden" name="url" value="{{ s.file }}">
+                {% endif %}
+                    <input type="hidden" name="next" value="{{ list_url }}">
+                    <button class="tile-play" title="Tocar {{ s.name }}">
+                        <span class="tile-art"><img src="/logo/{{ s.key }}?n={{ s.name|urlencode }}" alt="" loading="lazy"><span class="tile-fab">{{ icon("play-fill") }}</span></span>
+                        <span class="tile-name">{{ s.name }}</span>
+                        {% if s.stat is defined %}<span class="tile-stat" title="{% if list_order == 'votes' %}Votos{% elif list_order == 'clicktrend' %}Variação dos cliques face ao dia anterior{% else %}Cliques nas últimas 24 horas{% endif %} no radio-browser.info">{% if list_order == 'votes' %}{{ icon("heart-fill") }} {{ s.stat|compact }}{% elif list_order == 'clicktrend' %}{% if s.stat < 0 %}↘ −{{ (-s.stat)|compact }}{% else %}↗ +{{ s.stat|compact }}{% endif %}{% else %}{{ icon("play-fill") }} {{ s.stat|compact }}{% endif %}</span>{% endif %}
+                    </button>
+                </form>
+                <span class="badge"><span class="eq"><i></i><i></i><i></i></span><span class="badge-text">A tocar</span></span>
+                {% if view.name %}
+                <label class="tile-check"><input type="checkbox" name="url" value="{{ s.file }}" form="editar" aria-label="Escolher {{ s.name }}"></label>
+                {% endif %}
+                {% if view.live %}
+                <form action="/remove/{{ s.id }}" method="post" class="tile-del"><input type="hidden" name="next" value="{{ list_url }}"><button title="Remover" aria-label="Remover {{ s.name }}">{{ icon("x") }}</button></form>
+                {% else %}
+                <form action="/playlist_edit" method="post" class="tile-del">
+                    <input type="hidden" name="nome" value="{{ view.name }}">
+                    <input type="hidden" name="acao" value="remover">
+                    <input type="hidden" name="url" value="{{ s.file }}">
+                    <input type="hidden" name="next" value="{{ list_url }}">
+                    <button title="Remover" aria-label="Remover {{ s.name }}">{{ icon("x") }}</button>
+                </form>
+                {% endif %}
+            </div>
+{% endmacro %}
+
+{# Cartão pequeno do Início (ouvidas recentemente, destaques): toca com /ouvir, que
+   só a toca se já estiver na fila e, se não estiver, a experimenta #}
+{% macro station_card(url, name, logo, key, stat=None) %}
+            <form action="/ouvir" method="post" class="mini-card">
+                <input type="hidden" name="url" value="{{ url }}">
+                <input type="hidden" name="name" value="{{ name }}">
+                <input type="hidden" name="logo" value="{{ logo or '' }}">
+                <button title="Tocar {{ name }}">
+                    <span class="tile-art"><img src="/logo/{{ key }}?n={{ name|urlencode }}" alt="" loading="lazy"><span class="tile-fab">{{ icon("play-fill") }}</span></span>
+                    <span class="tile-name">{{ name }}</span>
+                    {% if stat %}<span class="tile-stat">{{ stat }}</span>{% endif %}
+                </button>
+            </form>
+{% endmacro %}

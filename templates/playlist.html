@@ -54,9 +54,14 @@
     </div>
 
     {% if view.entries %}
+    {# Com JavaScript é uma barra por cima do reprodutor, que só aparece com estações
+       escolhidas e diz quantas são; sem ele fica aqui, no fim da lista #}
     <form action="/playlist_edit" method="post" id="editar" class="panel edit-panel">
         <input type="hidden" name="nome" value="{{ view.name }}">
-        <p class="field">Com as estações escolhidas</p>
+        <div class="edit-head">
+            <p class="field edit-count" aria-live="polite">Com as estações escolhidas</p>
+            <button type="button" class="icon-btn edit-clear" title="Desmarcar todas" aria-label="Desmarcar todas">{{ icon("x") }}</button>
+        </div>
         {% set others = playlists|rejectattr("name", "equalto", view.name)|list %}
         {% if others %}
         <select name="destino" aria-label="Playlist de destino">

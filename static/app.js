@@ -229,6 +229,7 @@
         updateTitle();
         scheduleUndo();
         restoreFilters();
+        updateSelection();
     }
 
     async function handle(response, url, push) {
@@ -401,6 +402,13 @@
         input.focus();
     });
 
+    // O ✕ da barra das estações escolhidas desmarca todas e esconde-a
+    document.addEventListener("click", function (e) {
+        if (!e.target.closest(".edit-clear")) return;
+        document.querySelectorAll('input[form="editar"]:checked').forEach(function (box) { box.checked = false; });
+        updateSelection();
+    });
+
     // "Mostrar na lista" no reprodutor aberto: no Início fecha-o, desliza até ao
     // cartão e acende-o; noutra página vai ao Início (e o swap mostra o cartão)
     document.addEventListener("click", function (e) {
@@ -428,6 +436,16 @@
         load(url.pathname + url.search + url.hash, true);
     });
 
+    // Página de uma playlist: a barra "Com as estações escolhidas" só aparece com
+    // caixas marcadas e diz quantas são
+    function updateSelection() {
+        var panel = document.getElementById("editar");
+        if (!panel) return;
+        var n = document.querySelectorAll('input[form="editar"]:checked').length;
+        panel.classList.toggle("has-sel", n > 0);
+        if (n) panel.querySelector(".edit-count").textContent = n + (n === 1 ? " estação escolhida" : " estações escolhidas");
+    }
+
     document.addEventListener("input", function (e) {
         var t = e.target;
         var clear = t.parentNode && t.parentNode.querySelector(".search-clear");
@@ -447,6 +465,7 @@
     // depois de carregar num tema ou país, por isso aí não se envia nada
     document.addEventListener("change", function (e) {
         var t = e.target;
+        if (t.form && t.form.id === "editar" && t.type === "checkbox") return updateSelection();
         if (t.matches(".list-tools select")) return t.form.requestSubmit();
         if (!t.closest(".filters")) return;
         // Os filtros ficam lembrados para as outras páginas de Descobrir. A playlist de
@@ -486,6 +505,7 @@
         updateTitle();
         scheduleUndo();
         restoreFilters();
+        updateSelection();
         setInterval(poll, POLL_MS);
     });
 })();

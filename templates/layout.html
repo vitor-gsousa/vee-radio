@@ -8,7 +8,7 @@
 {% import "macros.html" as m with context %}
 {% block body %}
     <nav class="nav" aria-label="Navegação">
-        <a class="brand" href="/">{{ icon("radio-fill") }}<span>Comando Rádio</span></a>
+        <a class="brand" href="/">{{ icon("radio-fill") }}<span>VEE Rádio</span></a>
         {% for id, href, label, ic in [("inicio", "/", "Início", "house"), ("descobrir", "/descobrir", "Descobrir", "compass"), ("playlists", "/playlists", "Playlists", "playlist")] %}
         <a class="nav-link{% if page == id %} on{% endif %}" href="{{ href }}"{% if page == id %} aria-current="page"{% endif %}>
             {{ icon(ic ~ "-fill" if page == id else ic) }}<span>{{ label }}</span></a>

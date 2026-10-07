@@ -63,8 +63,8 @@ send_ntfy() {
     esac
     # Os cabeçalhos vão só em ASCII. O texto vai pelo stdin, em bytes: se não
     # chegar em UTF-8, o ntfy mostra-o como um anexo em vez da mensagem
-    printf 'Link do comando da rádio: %s' "$1" | ntfy_curl "$token" -fsS --max-time 15 -o /dev/null \
-        -H "Title: Vee Radio" \
+    printf 'Link do VEE Rádio: %s' "$1" | ntfy_curl "$token" -fsS --max-time 15 -o /dev/null \
+        -H "Title: VEE Radio" \
         -H "Tags: radio" \
         -H "Click: $1" \
         -H "Actions: view, Abrir comando, $1" \

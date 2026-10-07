@@ -309,7 +309,7 @@
             station = el && !stop ? el.textContent : "";
             playing = !stop;
         }
-        document.title = playing && station ? "▶ " + station : "Comando Rádio";
+        document.title = playing && station ? "▶ " + station : "VEE Rádio";
     }
 
     // Atualiza a barra do reprodutor e a estação marcada a partir do /estado

@@ -109,15 +109,23 @@ Para a rádio arrancar sozinha sempre que o telemóvel liga:
 2. Abre o Termux:Boot uma vez. Sem isso, o Android não o deixa correr no arranque.
 3. Nas definições do Android, desativa a otimização de bateria para o **Termux** e para o **Termux:Boot**.
 
-No arranque, o script corre o `~/start.sh`: a rádio e o comando local arrancam logo e, com o túnel ligado, espera-se até 2 minutos pela internet antes de o criar. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
+No arranque, o script corre primeiro o `~/update.sh`, que vai buscar a versão mais recente ao GitHub (espera até 30 segundos pela rede; sem ela fica a versão que já estava), e depois o `~/start.sh`: a rádio e o comando local arrancam logo e, com o túnel ligado, espera-se até 2 minutos pela internet antes de o criar. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
 
 ## Atualizar
+
+A rádio atualiza-se sozinha sempre que o telemóvel arranca (com o Termux:Boot). Para atualizar já, abre as Configurações (⚙, ou `~/config.sh` no Termux) e carrega em **Procurar atualizações**: se houver novidades, a rádio reinicia com elas e a música para uns segundos. No Termux, o mesmo é:
+
+```bash
+~/update.sh
+```
+
+O `update.sh` só avança para a versão do GitHub: se houver alterações locais que o impeçam, não mexe em nada e fica a versão atual. Quando o `install.sh` muda, corre-o também (atualiza os pacotes, por isso demora uns minutos). As playlists e os nomes guardados mantêm-se.
+
+Numa instalação anterior a esta opção, atualiza uma vez à mão, para ficares com o `~/update.sh` e o novo arranque automático:
 
 ```bash
 cd ~/vee-radio && git pull && bash install.sh && ~/start.sh
 ```
-
-Convém correr outra vez o `install.sh` depois do `git pull`, porque algumas novidades, como o arranque automático, são configuradas por ele. As playlists e os nomes guardados mantêm-se.
 
 Se instalaste à mão, copiando os ficheiros sem `git clone`, a pasta `~/vee-radio` não tem `.git` e o `git pull` não funciona. Nesse caso, muda-lhe o nome e instala de novo:
 

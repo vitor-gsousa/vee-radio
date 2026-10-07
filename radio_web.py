@@ -57,6 +57,8 @@ ACTIVE_FILE = os.path.expanduser("~/.config/mpd/playlist-ativa.txt")
 ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 ENV_EXAMPLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.example")
 START_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start.sh")
+# Vai buscar a versão mais recente ao GitHub (botão nas Configurações; também corre no arranque do telemóvel)
+UPDATE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "update.sh")
 RESTART_LOG = os.path.expanduser("~/restart.log")
 # Chave das Configurações: as outras apps do telemóvel também chegam a
 # localhost:8080, mas este ficheiro só o Termux o lê. O start.sh (sem túnel) e o
@@ -1941,7 +1943,22 @@ def config_context():
     values = read_env()
     return {"tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
             "has_token": bool(values.get("NTFY_TOKEN")), "suggestion": "radio-" + secrets.token_hex(8),
-            "saved": request.args.get("config") == "guardada"}
+            "saved": request.args.get("config") == "guardada", "version": app_version(),
+            "up_to_date": request.args.get("atualizacao") == "nada"}
+
+_version = None
+
+def app_version():
+    # Só muda com um reinício (o update.sh reinicia depois de atualizar), por isso lê-se uma vez
+    global _version
+    if _version is None:
+        try:
+            _version = subprocess.run(["git", "-C", os.path.dirname(os.path.abspath(__file__)), "log", "-1",
+                                       "--format=%h, %cd", "--date=format:%d/%m/%Y"], capture_output=True,
+                                      text=True, timeout=10, stdin=subprocess.DEVNULL).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            _version = ""
+    return _version
 
 @app.route("/entrar")
 def enter():
@@ -1957,11 +1974,12 @@ def enter():
     response.set_cookie(CONFIG_COOKIE, config_key(), max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
     return response
 
-def restart_all():
-    # Volta a correr o start.sh numa sessão à parte: ele termina este servidor, e
-    # assim não morre com ele. Os 2 segundos deixam a resposta chegar ao browser
+def restart_all(script=START_SCRIPT):
+    # Volta a correr o start.sh (ou o update.sh, que o corre no fim) numa sessão à
+    # parte: ele termina este servidor, e assim não morre com ele. Os 2 segundos
+    # deixam a resposta chegar ao browser
     log = open(RESTART_LOG, "ab")
-    subprocess.Popen(["bash", "-c", 'sleep 2; exec "$0"', START_SCRIPT], stdin=subprocess.DEVNULL,
+    subprocess.Popen(["bash", "-c", 'sleep 2; exec bash "$0"', script], stdin=subprocess.DEVNULL,
                      stdout=log, stderr=log, start_new_session=True, close_fds=True,
                      env={**os.environ, "VEE_RADIO_NO_OPEN": "1"})
     log.close()
@@ -1996,6 +2014,30 @@ def config():
                                         message=f"A música para durante alguns segundos. {link} Esta página volta sozinha."), 202)
     # Sem JavaScript o browser volta à página sozinho; com ele, o app.js faz o mesmo
     response.headers["Refresh"] = "12; url=/"
+    return response
+
+@app.route("/atualizar", methods=["POST"])
+def update():
+    if not can_configure():
+        return error_page("Sem acesso", "Só se atualiza no próprio telemóvel: abre as configurações no Termux com ~/config.sh.", 403)
+    # Primeiro só se vê se há novidades, para não parar a música à toa
+    try:
+        check = subprocess.run(["bash", UPDATE_SCRIPT, "--check"], capture_output=True, text=True,
+                               timeout=60, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return error_page("Sem resposta", "O GitHub não respondeu a tempo. Tenta outra vez daqui a pouco.", 504)
+    if check.returncode == 3:
+        return redirect("/?atualizacao=nada#config")
+    if check.returncode != 0:
+        reason = check.stdout.strip().splitlines()[-1:] or ["O update.sh falhou; vê o ~/restart.log."]
+        return error_page("Não foi possível atualizar", reason[0], 502)
+    # Se o install.sh mudou, o update.sh corre-o (atualiza os pacotes) antes de reiniciar
+    install = "instalar" in check.stdout.split()
+    restart_all(UPDATE_SCRIPT)
+    wait = "alguns minutos, porque também se atualizam as dependências" if install else "alguns segundos"
+    response = Response(render_template("error.html", title="A atualizar…",
+                                        message=f"A música para durante {wait}. Esta página volta sozinha."), 202)
+    response.headers["Refresh"] = f"{240 if install else 20}; url=/"
     return response
 
 if __name__ == "__main__":

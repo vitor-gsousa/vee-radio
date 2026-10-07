@@ -70,6 +70,12 @@
                 <button class="btn primary" name="aplicar" value="1">Guardar e aplicar agora</button>
                 <button class="btn">Guardar</button>
             </form>
+            <p class="field">Atualizações</p>
+            {% if config.up_to_date %}<p class="notice ok">{{ icon("check-circle") }} Já tens a versão mais recente.</p>{% endif %}
+            <form action="/atualizar" method="post" class="stack">
+                <p class="muted small">{% if config.version %}Versão {{ config.version }}. {% endif %}Vai buscar a versão mais recente ao GitHub e, se houver novidades, reinicia a rádio (a música para uns segundos). Também se atualiza sozinha quando o telemóvel arranca.</p>
+                <button class="btn">{{ icon("arrow-counter-clockwise") }} Procurar atualizações</button>
+            </form>
         </div>
     </div>
     {% endif %}

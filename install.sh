@@ -47,7 +47,7 @@ main() {
     else
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
-    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh"
+    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh" "$INSTALL_DIR/update.sh"
     # Configuração local (tópico do ntfy); nunca se substitui um .env que já exista
     if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
         cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
@@ -64,15 +64,18 @@ main() {
     ln -sf "$INSTALL_DIR/start.sh" ~/start.sh
     ln -sf "$INSTALL_DIR/stop.sh" ~/stop.sh
     ln -sf "$INSTALL_DIR/config.sh" ~/config.sh
+    ln -sf "$INSTALL_DIR/update.sh" ~/update.sh
 
     echo "=== 7. A configurar o arranque automático (Termux:Boot) ==="
     mkdir -p ~/.termux/boot
     cat > ~/.termux/boot/vee-radio <<'BOOT'
 #!/data/data/com.termux/files/usr/bin/bash
 termux-wake-lock
-# O start.sh espera pela internet só se o túnel estiver ligado (--boot); sem
-# túnel, a rádio e o comando local arrancam logo
-~/start.sh --boot > ~/boot.log 2>&1
+# Primeiro vai buscar a versão mais recente (espera até 30 s pela rede; sem ela
+# fica a que já estava). Depois, o start.sh espera pela internet só se o túnel
+# estiver ligado (--boot); sem túnel, a rádio e o comando local arrancam logo
+~/update.sh --boot > ~/boot.log 2>&1
+~/start.sh --boot >> ~/boot.log 2>&1
 BOOT
     chmod +x ~/.termux/boot/vee-radio
 

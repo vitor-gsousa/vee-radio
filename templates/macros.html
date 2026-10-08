@@ -20,7 +20,7 @@
 
 {# Filtros da pesquisa e dos temas: país, língua, qualidade e ordenação, que vão para o radio-browser.
    O para (veio do "Juntar rádios" de uma playlist) passa de página em página: põe
-   essa playlist à frente no menu do + e no "Juntar as desta página a" #}
+   essa playlist à frente no menu do + e na janela "Juntar" de um tema #}
 {% macro filter_fields(country=True) %}
     <div class="filters">
         {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
@@ -40,11 +40,6 @@
         </select>
         {{- order_select("ordem", orders, filters.ordem) }}
     </div>
-{% endmacro %}
-
-{# O que fazem os botões dos resultados #}
-{% macro destination() %}
-            <p class="hint">{{ icon("play-fill") }} ouve sem juntar · {{ icon("plus") }} junta a uma playlist</p>
 {% endmacro %}
 
 {# ▶ (experimenta sem juntar) e + (menu com as playlists; ✓ nas que já a têm) de um

@@ -1,7 +1,7 @@
 {% extends "layout.html" %}
 {% import "macros.html" as m with context %}
 {# Descobrir: pesquisa por nome, temas e países (cada um com o seu endereço) e os
-   resultados de um tema ou país (/tema). O "Juntar a" passa de separador em separador #}
+   resultados de um tema ou país (/tema). O "para" passa de separador em separador #}
 {% block content %}
     {% set para_qs = "?para=" ~ para|urlencode if para else "" %}
     {% if tab == "tema" %}
@@ -11,6 +11,12 @@
             <h1>{{ theme.label }}</h1>
             <p class="muted">{% if theme.results %}{{ theme.results|length }} rádios, {{ dict(orders)[filters.ordem] }}{% if pages.page > 1 or pages.more %} · página {{ pages.page }}{% endif %}{% else %}Sem rádios{% endif %}</p>
         </div>
+        {# Juntar as rádios da página de uma vez: numa janela, para a lista começar logo a seguir aos filtros #}
+        {% if theme.results %}
+        <div class="page-head-actions">
+            <a class="btn primary small" href="#juntar-todas">{{ icon("plus") }}<span>Juntar {{ theme.results|length }}</span></a>
+        </div>
+        {% endif %}
     </header>
     {# Mudar o país ou a ordenação sem voltar atrás #}
     <form action="/tema" method="get" class="refine panel">
@@ -21,43 +27,6 @@
     </form>
     {# O script troca o que está dentro de .results por um esqueleto enquanto espera pela API #}
     <div class="results">
-    {% if theme.results %}
-    {% set existing = playlists|map(attribute='name')|list %}
-    <form action="/add_theme" method="post" class="theme-add panel">
-        <input type="hidden" name="label" value="{{ theme.label }}">
-        {% for r in theme.results %}
-        <input type="hidden" name="url" value="{{ r.url_resolved }}">
-        <input type="hidden" name="name" value="{{ r.name }}">
-        <input type="hidden" name="logo" value="{{ r.favicon }}">
-        <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
-        {% endfor %}
-        {# Por omissão vão para a playlist escolhida em "Juntar a" (ou a que está a tocar).
-           A playlist nova é escolha explícita, porque passa a ser a que toca no lugar da atual #}
-        {% set paged = pages.page > 1 or pages.more %}
-        <label class="field" for="theme-target">{% if paged %}Juntar as desta página a{% else %}Juntar todas a{% endif %}</label>
-        <div class="inline-form">
-            <select name="target" id="theme-target">
-                {% if active %}
-                <option value="{{ active }}">{{ active }} (a tocar)</option>
-                {% endif %}
-                {% if theme.label != active %}
-                {% if theme.label in existing %}
-                <option value="{{ theme.label }}"{% if para == theme.label %} selected{% endif %}>{{ theme.label }}</option>
-                {% else %}
-                <option value="">Nova playlist «{{ theme.label }}» (passa a ser a que toca)</option>
-                {% endif %}
-                {% endif %}
-                {% for pl in playlists if pl.name != theme.label and pl.name != active %}
-                <option value="{{ pl.name }}"{% if para == pl.name %} selected{% endif %}>{{ pl.name }}</option>
-                {% endfor %}
-            </select>
-            <button class="btn primary">{{ icon("plus") }}<span>Juntar {{ theme.results|length }}</span></button>
-        </div>
-        <p class="muted small">Só se juntam as que ainda não estão na playlist escolhida.</p>
-    </form>
-    <h2 class="section-title">Uma a uma</h2>
-    {{ m.destination() }}
-    {% endif %}
     <div class="rows">
     {% for r in theme.results %}
     {{ m.result_row(r, request.full_path) }}
@@ -90,7 +59,6 @@
         {{ m.filter_fields() }}
         <button class="btn primary">{{ icon("magnifying-glass") }}<span>Procurar</span></button>
     </form>
-    {{ m.destination() }}
     <div class="results">
     {% if results is not none %}
         <div class="rows">
@@ -141,5 +109,51 @@
         </div>
     </form>
     {% endif %}
+    {% endif %}
+{% endblock %}
+
+{% block modals %}
+    {% if tab == "tema" and theme.results %}
+    {% set existing = playlists|map(attribute='name')|list %}
+    {% set paged = pages.page > 1 or pages.more %}
+    <div class="modal" id="juntar-todas">
+        <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
+        <div class="modal-box">
+            <a class="icon-btn close" href="#fechar" aria-label="Fechar">{{ icon("x") }}</a>
+            <h2>Juntar {{ theme.results|length }} rádios</h2>
+            <p class="muted small">{% if paged %}As rádios desta página{% else %}Todas as rádios{% endif %} de «{{ theme.label }}». Só se juntam as que ainda não estão na playlist escolhida.</p>
+    <form action="/add_theme" method="post" class="theme-add">
+        <input type="hidden" name="label" value="{{ theme.label }}">
+        {% for r in theme.results %}
+        <input type="hidden" name="url" value="{{ r.url_resolved }}">
+        <input type="hidden" name="name" value="{{ r.name }}">
+        <input type="hidden" name="logo" value="{{ r.favicon }}">
+        <input type="hidden" name="uuid" value="{{ r.stationuuid }}">
+        {% endfor %}
+        {# Por omissão vão para a playlist do "para" (veio de "Juntar rádios" de uma playlist)
+           ou para a que está a tocar. A playlist nova é escolha explícita, porque passa a
+           ser a que toca no lugar da atual #}
+        <label class="field" for="theme-target">Juntar a</label>
+        <div class="inline-form">
+            <select name="target" id="theme-target">
+                {% if active %}
+                <option value="{{ active }}">{{ active }} (a tocar)</option>
+                {% endif %}
+                {% if theme.label != active %}
+                {% if theme.label in existing %}
+                <option value="{{ theme.label }}"{% if para == theme.label %} selected{% endif %}>{{ theme.label }}</option>
+                {% else %}
+                <option value="">Nova playlist «{{ theme.label }}» (passa a ser a que toca)</option>
+                {% endif %}
+                {% endif %}
+                {% for pl in playlists if pl.name != theme.label and pl.name != active %}
+                <option value="{{ pl.name }}"{% if para == pl.name %} selected{% endif %}>{{ pl.name }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn primary">{{ icon("plus") }}<span>Juntar {{ theme.results|length }}</span></button>
+        </div>
+    </form>
+        </div>
+    </div>
     {% endif %}
 {% endblock %}

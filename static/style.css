@@ -179,6 +179,12 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .panel { background: var(--surface); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
 /* Com o script, os filtros aplicam-se ao mudar e o botão Atualizar não é preciso */
 .refine { display: flex; flex-direction: column; gap: 10px; }
+/* Telemóvel: os filtros de um tema numa só linha que desliza, sem o fundo do painel,
+   para as rádios começarem mais acima */
+.refine.panel { background: none; padding: 0; }
+.refine .filters { display: flex; overflow-x: auto; scrollbar-width: none; }
+.refine .filters::-webkit-scrollbar { display: none; }
+.refine .filters select { flex: none; width: auto; max-width: 70vw; }
 .js .refine > .btn { display: none; }
 
 /* Navegação: separadores em baixo no telemóvel */
@@ -598,5 +604,7 @@ body.busy::before {
     .tile:hover .tile-del, .tile-del:focus-within { opacity: 1; }
     .filters { grid-template-columns: repeat(4, 1fr); }
     .refine { flex-direction: row; align-items: center; }
-    .refine .filters { flex: 1; }
+    .refine.panel { background: var(--surface); padding: 14px; }
+    .refine .filters { flex: 1; display: grid; overflow: visible; }
+    .refine .filters select { width: 100%; max-width: none; }
 }

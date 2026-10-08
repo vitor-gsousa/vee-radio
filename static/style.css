@@ -284,6 +284,7 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .thumb { width: 52px; height: 52px; flex: none; border-radius: 8px; object-fit: contain; background: #fff; }
 .thumb.empty { display: flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--dim); }
 .thumb.empty .i { width: 24px; height: 24px; }
+.thumb.empty[hidden] { display: none; }
 .playlist-row.playing .row-title { color: var(--accent-fg); }
 /* Versões da mesma rádio nos resultados: um pill por baixo do nome que mostra as outras */
 .versions { margin: -4px 0 4px 70px; }

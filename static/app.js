@@ -69,13 +69,27 @@
     // Logótipos e ícones: brilham (esqueleto) até a imagem chegar. O evento load
     // não sobe na árvore, por isso é apanhado na fase de captura; as imagens que
     // já tinham chegado antes do script são marcadas por markLoadedImages
+    // Favicon dos resultados que não carregou (ou é uma imagem vazia de 1 ou 2
+    // píxeis): sai, e aparece o ícone de rádio que vem escondido a seguir
+    function checkThumb(img) {
+        if (!img.matches("img.thumb") || img.naturalWidth > 2) return;
+        var fallback = img.nextElementSibling;
+        if (!fallback || !fallback.matches(".thumb.empty")) return;
+        fallback.hidden = false;
+        img.remove();
+    }
+
     function markLoaded(e) {
-        if (e.target.tagName === "IMG") e.target.classList.add("loaded");
+        if (e.target.tagName !== "IMG") return;
+        e.target.classList.add("loaded");
+        checkThumb(e.target);
     }
 
     function markLoadedImages() {
         document.querySelectorAll("img:not(.loaded)").forEach(function (img) {
-            if (img.complete) img.classList.add("loaded");
+            if (!img.complete) return;
+            img.classList.add("loaded");
+            checkThumb(img);
         });
     }
 

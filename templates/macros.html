@@ -85,8 +85,9 @@
 {% macro result_row(r, back_to, tags=False) %}
             <div class="result">
             <div class="row-item">
-                {# O favicon vem direto do radio-browser e só carrega quando aparece no ecrã #}
-                {% if r.favicon %}<img class="thumb" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer">{% else %}<span class="thumb empty">{{ icon("radio") }}</span>{% endif %}
+                {# O favicon vem direto do radio-browser e só carrega quando aparece no ecrã.
+                   Muitos já não existem: o script troca-o pelo ícone escondido a seguir #}
+                {% if r.favicon %}<img class="thumb" src="{{ r.favicon }}" alt="" loading="lazy" referrerpolicy="no-referrer"><span class="thumb empty" hidden>{{ icon("radio") }}</span>{% else %}<span class="thumb empty">{{ icon("radio") }}</span>{% endif %}
                 <div class="row-body">
                     <div class="row-title">{{ r.name }}</div>
                     <div class="row-meta">{{ r.countrycode|flag }} {{ r.countrycode or '?' }} · {{ r.codec or '?' }}{% if r.bitrate %} · {{ r.bitrate }} kbps{% endif %}{% if tags and r.tags %} · {{ r.tags[:60] }}{% endif %}</div>

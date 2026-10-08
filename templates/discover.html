@@ -109,11 +109,17 @@
     {# Para quem já tem o endereço de um stream; fechado por omissão #}
     <details class="panel url-add">
         <summary>{{ icon("link-simple") }}<span>Juntar pelo endereço do stream</span>{{ icon("caret-down", "summary-caret") }}</summary>
+        {# As mesmas playlists do menu do + (a do "para" primeiro, depois a que toca);
+           volta a esta página, com o aviso de onde ficou #}
         <form action="/add_stream" method="post" class="stack">
             <input type="text" name="url" placeholder="URL (ex: http://...mp3)" required>
             <input type="text" name="name" placeholder="Nome da estação (opcional)">
-            {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
-            <button class="btn primary">{{ icon("plus") }}<span>Juntar{% if para %} a «{{ para }}»{% endif %}</span></button>
+            <label class="field" for="url-target">Juntar a</label>
+            <select name="para" id="url-target">
+                {% for t in add_targets %}<option value="{{ t.value }}">{{ t.label }}{% if t.playing %} (a tocar){% endif %}</option>{% endfor %}
+            </select>
+            <input type="hidden" name="next" value="{{ request.full_path }}">
+            <button class="btn primary">{{ icon("plus") }}<span>Juntar</span></button>
         </form>
     </details>
 

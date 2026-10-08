@@ -1369,12 +1369,12 @@ def find_stations(filters, page, **criteria):
             del _search_cache[old]
     return list(results), more
 
-def search_stations(filters, page, **criteria):
-    # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
-    # Cada página são PAGE_SIZE entradas da API; os repetidos e os HLS ficam de
-    # fora e as versões da mesma rádio juntam-se, por isso mostram-se um pouco menos.
-    # Há mais páginas quando a API devolveu a página inteira
-    params = {"limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE, "hidebroken": "true", "order": filters["ordem"],
+# Quantas entradas antes da página se veem para tirar as rádios que já apareceram
+DEDUP_LOOKBACK = 1000
+
+def api_search(filters, offset, limit, **criteria):
+    # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo
+    params = {"limit": limit, "offset": offset, "hidebroken": "true", "order": filters["ordem"],
               "reverse": "false" if filters["ordem"] == "name" else "true", **criteria}
     if filters["pais"]:
         params["countrycode"] = filters["pais"]
@@ -1388,7 +1388,34 @@ def search_stations(filters, page, **criteria):
         stations = json.load(r)
     if not isinstance(stations, list):
         raise ValueError("resposta inesperada do radio-browser")
+    return stations
+
+def search_stations(filters, page, **criteria):
+    # Cada página são PAGE_SIZE entradas da API; os repetidos e os HLS ficam de
+    # fora e as versões da mesma rádio juntam-se, por isso mostram-se um pouco menos.
+    # Há mais páginas quando a API devolveu a página inteira
+    start = (page - 1) * PAGE_SIZE
+    stations = api_search(filters, start, PAGE_SIZE, **criteria)
     results = group_versions(clean_stations(stations))
+    # A API põe as versões da mesma rádio onde calha, às vezes em páginas
+    # diferentes: saem as que já apareceram nas páginas anteriores (até
+    # DEDUP_LOOKBACK entradas para trás, num só pedido). Nas aleatórias cada
+    # pedido é outro sorteio, por isso não há anteriores a comparar
+    if start and filters["ordem"] != "random":
+        first = max(0, start - DEDUP_LOOKBACK)
+        try:
+            before = clean_stations(api_search(filters, first, start - first, **criteria))
+        except (OSError, ValueError):
+            before = []  # sem a comparação, a página aparece na mesma
+        seen = {group_key(s["name"], s["countrycode"]) for s in before}
+        # Uma entrada sem país é da rádio com esse nome que já apareceu, e vice-versa;
+        # com países diferentes são rádios diferentes ("Rock Radio" CZ e PL)
+        seen_names = {name for name, _ in seen}
+        countryless = {name for name, country in seen if not country}
+        def repeated(r):
+            name, country = group_key(r["name"], r["countrycode"])
+            return (name, country) in seen or name in countryless or (not country and name in seen_names)
+        results = [r for r in results if not repeated(r)]
     if filters["ordem"] == "name":
         # A API ordena os nomes tal como estão, com espaços e pontuação à frente
         # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas

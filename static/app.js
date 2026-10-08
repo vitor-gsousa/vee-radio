@@ -182,6 +182,8 @@
     function saveFocus() {
         var el = document.activeElement;
         if (!el || !el.form || !el.name || el.type === "hidden" || el.tagName !== "INPUT") return null;
+        // O nome da playlist nova do menu do + é de uma rádio só: não passa para outra
+        if (el.closest(".add-menu")) return null;
         return { action: el.form.getAttribute("action"), name: el.name, value: el.value,
                  start: el.selectionStart, end: el.selectionEnd };
     }

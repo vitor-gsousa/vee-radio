@@ -110,6 +110,9 @@ button.add-menu-item:hover, button.add-menu-item:focus-visible { background: var
 .add-menu-item.done .i { color: var(--ok); }
 .add-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .add-menu-note { flex: none; font-size: 11px; font-weight: 700; color: var(--accent-fg); }
+.add-menu-new { order: 1; display: flex; align-items: center; gap: 6px; margin-top: 4px; padding: 8px 4px 2px 6px; border-top: 1px solid var(--line); }
+.add-menu-new input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 14px; }
+.add-menu-new .icon-btn { flex: none; width: 36px; height: 36px; }
 .icon-btn.play { background: var(--accent); color: var(--accent-ink); }
 .icon-btn.play:hover { filter: brightness(1.18); background: var(--accent); }
 

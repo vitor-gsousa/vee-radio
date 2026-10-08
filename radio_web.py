@@ -1963,6 +1963,10 @@ def add_stream():
     if url and not safe_url(url):
         return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://, "
                           "não pode ter quebras de linha e tem de ter menos de 2048 caracteres.", 400)
+    # "Nova playlist" no menu do +: cria-a já com esta rádio, sem a pôr a tocar
+    new_list = request.form.get("nova_playlist", "").strip() if request.form.get("criar") else None
+    if new_list is not None and playlist_path(new_list) is None:
+        return error_page(*BAD_NAME)
     if url:
         remember_uuids([(url, request.form.get("uuid", ""))])
         remember_versions([url])
@@ -1982,6 +1986,14 @@ def add_stream():
                     pass
             label = f"«{name}»" if name else "A rádio"
             with mpd_client() as c:
+                if new_list is not None:
+                    created = not os.path.isfile(playlist_path(new_list))
+                    os.makedirs(PLAYLIST_DIR, exist_ok=True)
+                    added = append_to_playlist(c, new_list, [(url, name or None, logo or None)])
+                    if created:
+                        return with_notice(back(), f"Playlist «{new_list}» criada com {label if name else 'a rádio'}.")
+                    # Já existia (outro aparelho criou-a entretanto): junta-se como a qualquer outra
+                    return with_notice(back(), f"{label} {'juntada a' if added else 'já estava em'} «{new_list}».")
                 target = chosen_playlist()
                 if target:
                     # Para outra playlist: só o ficheiro, a música não muda

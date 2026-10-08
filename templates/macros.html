@@ -69,11 +69,18 @@
                         <input type="hidden" name="uuid" value="{{ uuid }}">
                         <input type="hidden" name="next" value="{{ back_to }}">
                         <span class="add-menu-title">Juntar a</span>
+                        {# Nova playlist, já com esta rádio (a música não muda). Vem antes dos
+                           botões das playlists para o Enter no campo criar, e não juntar à
+                           primeira; o CSS põe-na no fim. Os outros botões não pedem o nome #}
+                        <span class="add-menu-new">
+                            <input type="text" name="nova_playlist" placeholder="Nova playlist" aria-label="Nome da nova playlist" autocomplete="off" required>
+                            <button class="icon-btn" name="criar" value="1" title="Criar a playlist com esta rádio" aria-label="Criar a playlist com esta rádio">{{ icon("plus") }}</button>
+                        </span>
                         {% for t in add_targets %}
                         {% if url in t.urls %}
                         <span class="add-menu-item done">{{ icon("check") }}<span class="add-menu-name">{{ t.label }}</span>{% if t.playing %}<span class="add-menu-note">a tocar</span>{% endif %}</span>
                         {% else %}
-                        <button class="add-menu-item" name="para" value="{{ t.value }}">{{ icon("plus") }}<span class="add-menu-name">{{ t.label }}</span>{% if t.playing %}<span class="add-menu-note">a tocar</span>{% endif %}</button>
+                        <button class="add-menu-item" name="para" value="{{ t.value }}" formnovalidate>{{ icon("plus") }}<span class="add-menu-name">{{ t.label }}</span>{% if t.playing %}<span class="add-menu-note">a tocar</span>{% endif %}</button>
                         {% endif %}
                         {% endfor %}
                     </form>

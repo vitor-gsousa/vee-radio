@@ -173,18 +173,20 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filters select { min-width: 0; padding-top: 10px; padding-bottom: 10px; font-size: 14px; }
-.search-form { display: flex; flex-direction: column; gap: 12px; }
+.search-form { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
 .search-form > .btn { align-self: flex-start; }
+/* Com o script a pesquisa corre enquanto se escreve, e o Enter procura logo */
+.js .search-form > .btn { display: none; }
 .search-form, .refine, .theme-add, .url-add, .edit-panel { max-width: 900px; }
 .panel { background: var(--surface); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
 /* Com o script, os filtros aplicam-se ao mudar e o botão Atualizar não é preciso */
 .refine { display: flex; flex-direction: column; gap: 10px; }
-/* Telemóvel: os filtros de um tema numa só linha que desliza, sem o fundo do painel,
-   para as rádios começarem mais acima */
+/* Telemóvel: os filtros da pesquisa e de um tema numa só linha que desliza, sem o
+   fundo do painel, para as rádios começarem mais acima */
 .refine.panel { background: none; padding: 0; }
-.refine .filters { display: flex; overflow-x: auto; scrollbar-width: none; }
-.refine .filters::-webkit-scrollbar { display: none; }
-.refine .filters select { flex: none; width: auto; max-width: 70vw; }
+.refine .filters, .search-form .filters { display: flex; overflow-x: auto; scrollbar-width: none; }
+.refine .filters::-webkit-scrollbar, .search-form .filters::-webkit-scrollbar { display: none; }
+.refine .filters select, .search-form .filters select { flex: none; width: auto; max-width: 70vw; }
 .js .refine > .btn { display: none; }
 
 /* Navegação: separadores em baixo no telemóvel */
@@ -605,6 +607,7 @@ body.busy::before {
     .filters { grid-template-columns: repeat(4, 1fr); }
     .refine { flex-direction: row; align-items: center; }
     .refine.panel { background: var(--surface); padding: 14px; }
-    .refine .filters { flex: 1; display: grid; overflow: visible; }
-    .refine .filters select { width: 100%; max-width: none; }
+    .refine .filters { flex: 1; }
+    .refine .filters, .search-form .filters { display: grid; overflow: visible; }
+    .refine .filters select, .search-form .filters select { width: 100%; max-width: none; }
 }

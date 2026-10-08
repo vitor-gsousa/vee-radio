@@ -65,7 +65,7 @@
             {{ logo("player-logo") }}
             <span class="player-info">
                 <span class="player-station">{% if details.countrycode %}<span class="player-flag" title="{{ details.countrycode }}">{{ details.countrycode|flag }}</span> {% endif %}{{ current_station or 'Nenhuma estação' }}</span>
-                <span class="player-title">{{ current_title or state }}</span>
+                <span class="player-title{% if stream_failed %} failed{% endif %}">{{ stream_note or current_title or state }}</span>
                 {{ detail_line() }}
             </span>
         </a>
@@ -84,7 +84,7 @@
             <div class="sheet-head">
                 <div class="sheet-info">
                     <h2 class="sheet-station">{% if details.countrycode %}<span class="player-flag" title="{{ details.countrycode }}">{{ details.countrycode|flag }}</span> {% endif %}{{ current_station or 'Nenhuma estação' }}</h2>
-                    <p class="sheet-title">{{ current_title or state }}</p>
+                    <p class="sheet-title{% if stream_failed %} failed{% endif %}">{{ stream_note or current_title or state }}</p>
                     {% if kbps or details.tags %}<p class="sheet-detail">{% if kbps %}<span>{{ kbps }} kbps</span>{% endif %}{% for tag in details.tags %}<span>{{ tag }}</span>{% endfor %}</p>{% endif %}
                 </div>
                 <div class="sheet-actions">{{ station_actions() }}</div>

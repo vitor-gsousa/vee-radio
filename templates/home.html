@@ -14,10 +14,10 @@
         </div>
     </header>
 
-    {% if status.error %}
+    {% if stream_error %}
     <a class="notice danger notice-link" href="{{ list_href }}#aviso">
         {{ icon("warning-circle", "notice-icon") }}
-        <span class="notice-body"><strong>{% if failed %}«{{ failed.name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> Abre a lista para tocar outra, procurar a rádio outra vez ou removê-la.</span>
+        <span class="notice-body"><strong>{% if stream_lost %}{{ stream_error }}{% elif failed_name %}«{{ failed_name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> Abre a lista para tocar outra, procurar a rádio outra vez ou removê-la.</span>
     </a>
     {% endif %}
 

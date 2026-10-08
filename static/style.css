@@ -415,6 +415,7 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .player-detail { font-size: 11px; color: var(--dim); }
 .player-detail > span + span::before { content: " · "; }
 .trying { color: var(--warn); font-weight: 700; }
+.player-title.failed, .sheet-title.failed { color: var(--danger); font-weight: 700; }
 .player-actions, .player-side { display: none; }
 .player-keep .btn { padding: 7px 12px; font-size: 13px; }
 .controls { display: flex; align-items: center; gap: 2px; flex: none; }

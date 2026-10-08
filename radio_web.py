@@ -151,10 +151,43 @@ STREAM_FAILED_HINT ='O endereço pode ter mudado. Procura a rádio outra vez em 
 
 STATES = {"play": "A tocar", "pause": "Em pausa", "stop": "Parado"}
 
+# A estação que se escolheu tocar (id do MPD, None depois de parar), para o vigia
+# do stream saber o que o utilizador quer ouvir. seq muda a cada escolha
+_choice = {"seq": 0, "id": None}
+_choice_lock = threading.Lock()
+
+def note_choice(song_id):
+    with _choice_lock:
+        _choice["seq"] += 1
+        _choice["id"] = None if song_id is None else str(song_id)
+
+class RadioClient(MPDClient):
+    # As ligações das rotas: tocar e parar ficam registados para o vigia. Assim
+    # distingue um stream que caiu (o MPD salta sozinho para a seguinte, ou para)
+    # de um ⏭ ou ⏹, sem cada rota ter de se lembrar disso
+    # Mesmo quando o MPD responde com erro (o stream não ligou), a escolha conta:
+    # o vigia deixa a anterior e tenta esta
+    def playid(self, *args):
+        try:
+            return super().playid(*args)
+        finally:
+            note_choice(args[0] if args else self.status().get("songid"))
+
+    def play(self, *args):
+        try:
+            return super().play(*args)
+        finally:
+            note_choice(self.status().get("songid"))
+
+    def stop(self):
+        result = super().stop()
+        note_choice(None)
+        return result
+
 @contextmanager
-def mpd_client():
+def mpd_client(client_class=RadioClient):
     # Abre uma ligação ao MPD e garante que é fechada mesmo que um comando falhe
-    client = MPDClient()
+    client = client_class()
     client.connect("localhost", 6600)
     try:
         yield client
@@ -849,7 +882,12 @@ def player_context(status, current, info):
         if elapsed >= HISTORY_MIN_SECONDS:
             note_played(current["file"], station,
                         info.get(current["file"], {}).get("logo") or (preview or {}).get("logo"))
+    # O vigia do stream: a voltar a ligar, falhou, ou passou para outra versão
+    watch = watch_view(current.get("file"))
+    stream_note = (f"A voltar a ligar… (tentativa {watch['attempt']} de {len(RETRY_DELAYS)})"
+                   if watch.get("attempt") else watch.get("text", ""))
     return {"status": status, "state": STATES.get(status.get("state"), status.get("state")),
+            "stream_note": stream_note, "stream_failed": bool(watch.get("failed")),
             "details": details, "kbps": kbps, "versions": versions,
             "voted": time.time() - (details.get("voted_at") or 0) < VOTE_COOLDOWN,
             "current_station": station,
@@ -868,7 +906,7 @@ def with_sig(player):
     parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
              player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
              d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"], player["tile_id"],
-             ",".join(v["url"] for v in player["versions"])]
+             ",".join(v["url"] for v in player["versions"]), player["stream_note"]]
     player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
     return player
 
@@ -916,9 +954,7 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
     # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
         status = c.status()
-        if try_other_version(c, status):
-            status = c.status()
-        current = c.currentsong()
+        current = watched_song(c, c.currentsong())
         queue = listed(c.playlistinfo())
         stored_playlists = sorted(p['playlist'] for p in c.listplaylists())
 
@@ -940,9 +976,13 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   if list_params else "")
     _, counts, covers = station_index()
     playlists = [{"name": p, "count": counts.get(p, 0), "cover": covers.get(p, [])} for p in stored_playlists]
-    # A estação que falhou, pelo URL na mensagem de erro do MPD ("Failed to decode http://...")
+    # A estação que falhou: a que o vigia desistiu de religar, ou pelo URL na
+    # mensagem de erro do MPD ("Failed to decode http://...")
+    failure = stream_failure()
     error = status.get("error", "")
-    failed = next((s for s in stations if error and s["file"] in error), None)
+    failed = next((s for s in stations if (failure and s["file"] == failure["url"])
+                   or (error and s["file"] in error)), None)
+    stream_error = failure["text"] if failure else error
     # Para onde vão as rádios de Descobrir; o ✓ dos resultados é dessa playlist
     para = chosen_playlist()
     target_urls = {u for u, _, _ in read_m3u(playlist_path(para))} if para else {s["file"] for s in queue}
@@ -954,7 +994,9 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme, dashboard=dashboard,
-                                  failed=failed, removed=removed_context(),
+                                  failed=failed, stream_error=stream_error, stream_lost=bool(failure),
+                                  failed_name=failed["name"] if failed else (failure or {}).get("name"),
+                                  removed=removed_context(),
                                   config=config_context() if can_configure() else None)
 
 def tunnel_host():
@@ -1095,18 +1137,16 @@ def estado(notice=None):
     # O notice é uma mensagem curta para o script mostrar (por exemplo, depois de votar)
     with mpd_client() as c:
         status = c.status()
-        switched = try_other_version(c, status)
-        if switched:
-            status = c.status()
-            notice = notice or switched
-        current = c.currentsong()
+        current = watched_song(c, c.currentsong())
         queue = c.playlistinfo()
     player = with_sig(player_context(status, current, station_info()))
     # O polling manda o sig da barra que tem: se for igual, não se volta a fazer
     html_player = None if request.args.get("sig") == player["sig"] else render_template("player.html", **player)
+    failure = stream_failure()
     return jsonify(player=html_player, sig=player["sig"], id=player["current_id"],
                    station=player["current_station"], playing=status.get("state") == "play",
-                   queue=queue_sig(queue), error=status.get("error", ""), notice=notice)
+                   queue=queue_sig(queue), error=status.get("error", "") or (failure or {}).get("text", ""),
+                   failed=(failure or {}).get("text", ""), notice=notice)
 
 def back():
     # Volta à página de onde veio o formulário (resultados da pesquisa, lista
@@ -1578,7 +1618,7 @@ def step(c, delta):
     ids = [s["id"] for s in listed(c.playlistinfo())]
     if not ids:
         return
-    current = c.currentsong().get("id")
+    current = watched_song(c, c.currentsong()).get("id")
     c.playid(ids[(ids.index(current) + delta) % len(ids)] if current in ids else ids[0])
     drop_preview(c)
 
@@ -1602,12 +1642,16 @@ def replace_stream(c, song, new_url):
     known = station_info().get(old, {})
     preview = read_preview()
     new_id = c.addid(new_url, int(song["pos"]))
-    c.playid(new_id)
+    try:
+        c.playid(new_id)
+    except CommandError:
+        pass  # a versão nova não ligou: o vigia do stream volta a tentar
     c.deleteid(song["id"])
     if preview and preview["url"] == old:
         set_preview({**preview, "url": new_url})
     else:
         sync_active(c, {new_url: (known.get("name") or song.get("name"), known.get("logo"))})
+    return str(new_id)
 
 @app.route("/versao", methods=["POST"])
 def change_version():
@@ -1629,34 +1673,156 @@ def change_version():
 FALLBACK_SECONDS = 600
 _fallback = {}
 
-def try_other_version(c, status):
-    # Uma rádio não tocou e há outra versão dela por tentar: troca e toca. Devolve
-    # a mensagem para mostrar, ou None. Corre no /estado e nas páginas, por quem
-    # chegar primeiro; os outros pedidos não esperam pelo lock
-    error = status.get("error", "")
-    if not error or not QUEUE_LOCK.acquire(blocking=False):
-        return None
-    try:
-        song = next((s for s in c.playlistinfo() if s["file"] in error), None)
-        if not song:
-            return None
-        alts = load_versions().get(song["file"], {}).get("alts", [])
-        group = tuple(sorted(v["url"] for v in alts))
-        now = time.time()
-        for key in [k for k, (t, _) in _fallback.items() if now - t > FALLBACK_SECONDS]:
-            del _fallback[key]
-        tried = _fallback.setdefault(group, (now, set()))[1]
-        tried.add(song["file"])
-        nxt = next((v for v in alts if v["url"] not in tried), None)
-        if not nxt:
-            return None
+def untried_version(song):
+    # A versão seguinte da rádio que ainda não se tentou, ou None
+    alts = load_versions().get(song["file"], {}).get("alts", [])
+    group = tuple(sorted(v["url"] for v in alts))
+    now = time.time()
+    for key in [k for k, (t, _) in _fallback.items() if now - t > FALLBACK_SECONDS]:
+        del _fallback[key]
+    tried = _fallback.setdefault(group, (now, set()))[1]
+    tried.add(song["file"])
+    nxt = next((v for v in alts if v["url"] not in tried), None)
+    if nxt:
         tried.add(nxt["url"])
-        name = station_info().get(song["file"], {}).get("name") or song.get("name") or ""
+    return nxt
+
+# Vigia do stream. Quando a ligação cai a meio, o MPD não dá erro: salta sozinho
+# para a estação seguinte da fila, ou para se era a última; quando não liga e há
+# mais estações, também salta. O vigia corre numa thread, mesmo sem ninguém com a
+# página aberta: volta a pôr a estação escolhida e tenta outra vez, até
+# len(RETRY_DELAYS) vezes seguidas, à espera de cada intervalo (a rede pode estar
+# a voltar). Só conta como recuperada depois de STABLE_SECONDS a tocar, porque um
+# stream que liga e volta a cair também é uma tentativa falhada. Esgotadas as
+# tentativas, passa para outra versão da rádio, se houver; senão para e avisa
+RETRY_DELAYS = (1, 3, 5, 10, 15)
+STABLE_SECONDS = 15
+WATCH_INTERVAL = 1
+VERSION_NOTICE_SECONDS = 30
+# O que o reprodutor mostra: {"url", "id", "attempt"} a voltar a ligar, {"url", "id",
+# "failed", "name", "text"} depois de falhar, {"url", "text", "until"} depois de
+# mudar de versão
+_watch = {}
+
+def watched_song(c, current):
+    # A estação que o vigia está a religar, ou que falhou, é a atual para o
+    # reprodutor e os botões, mesmo que o cursor do MPD tenha ficado na seguinte
+    song_id = _watch.get("id")
+    if not song_id or current.get("id") == song_id:
+        return current
+    try:
+        return c.playlistid(song_id)[0]
+    except (CommandError, IndexError):
+        return current
+
+def watch_view(url):
+    # O estado do vigia, se é da estação atual e ainda vale
+    view = _watch
+    if not url or view.get("url") != url or view.get("until", float("inf")) < time.time():
+        return {}
+    return view
+
+def stream_failure():
+    # A estação que deixou de tocar e não voltou, ou None
+    return _watch if _watch.get("failed") else None
+
+def failure_text(name):
+    return f"«{name}» deixou de tocar: o stream falhou {len(RETRY_DELAYS)} vezes seguidas." if name \
+        else f"O stream falhou {len(RETRY_DELAYS)} vezes seguidas."
+
+def station_name(song):
+    preview = read_preview()
+    return (station_info().get(song["file"], {}).get("name")
+            or (preview["name"] if preview and preview["url"] == song["file"] else None)
+            or song.get("name") or "")
+
+def replay(c, song_id):
+    # O play do MPD pode logo dar erro quando o stream não liga; a volta seguinte
+    # do vigia vê-o parado (ou noutra estação) e conta a tentativa
+    try:
+        c.playid(song_id)
+    except CommandError:
+        pass
+
+def watch_step(c, st):
+    # Uma volta do vigia. st guarda o que se vigia: wanted (id da estação que devia
+    # estar a tocar), attempts (tentativas seguidas) e retry_at (próxima tentativa)
+    global _watch
+    with _choice_lock:
+        seq, chosen = _choice["seq"], _choice["id"]
+    status = c.status()
+    state, song_id = status.get("state"), status.get("songid")
+    if seq != st["seq"]:
+        # Escolha nova (tocar, parar, outra estação): é essa que se vigia
+        st.update(seq=seq, wanted=chosen, attempts=0, retry_at=None)
+        _watch = {}
+        return
+    wanted = st["wanted"]
+    if wanted is None:
+        # A tocar sem escolha registada: ao arrancar, ou pelo mpc
+        if state == "play":
+            st.update(wanted=song_id, attempts=0, retry_at=None)
+            _watch = {}
+        return
+    if state == "pause":
+        return
+    if state == "play" and song_id == wanted:
+        try:
+            elapsed = float(status.get("elapsed") or 0)
+        except ValueError:
+            elapsed = 0
+        if st["attempts"] and elapsed >= STABLE_SECONDS:
+            st["attempts"] = 0
+            if _watch.get("attempt"):
+                _watch = {}
+        return
+    song = next((s for s in c.playlistinfo() if s["id"] == wanted), None)
+    if song is None:
+        # Saiu da fila (removida noutro sítio): passa a vigiar a que toca agora
+        st.update(wanted=song_id if state == "play" else None, attempts=0, retry_at=None)
+        _watch = {}
+        return
+    if st["retry_at"] is not None:
+        if time.time() >= st["retry_at"]:
+            st["retry_at"] = None
+            replay(c, wanted)
+        return
+    # O stream caiu ou não ligou. Se o MPD passou para outra estação, para-a: o
+    # reprodutor, o ▶ e o ⏮ ⏭ usam a que se está a religar (watched_song)
+    if state == "play":
+        c.stop()
+    if st["attempts"] < len(RETRY_DELAYS):
+        st["retry_at"] = time.time() + RETRY_DELAYS[st["attempts"]]
+        st["attempts"] += 1
+        _watch = {"url": song["file"], "id": wanted, "attempt": st["attempts"]}
+        return
+    name = station_name(song)
+    nxt = untried_version(song)
+    if nxt:
         remember_uuids([(nxt["url"], nxt.get("uuid", ""))])
-        replace_stream(c, song, nxt["url"])
-        return {"ok": True, "text": f"«{name}» não tocou nessa versão: a tocar em {nxt['label']}."}
-    finally:
-        QUEUE_LOCK.release()
+        st.update(wanted=replace_stream(c, song, nxt["url"]), attempts=0, retry_at=None)
+        _watch = {"url": nxt["url"], "until": time.time() + VERSION_NOTICE_SECONDS,
+                  "text": f"Não tocou nessa versão: a tocar em {nxt['label']}."}
+        return
+    c.stop()
+    st.update(wanted=None, attempts=0, retry_at=None)
+    _watch = {"url": song["file"], "id": wanted, "failed": True, "name": name, "text": failure_text(name)}
+
+def watch_stream():
+    # Ligação própria ao MPD (sem registar as escolhas), aberta outra vez quando o
+    # MPD reinicia. As mudanças à fila fazem-se com o QUEUE_LOCK, como nas rotas
+    while True:
+        try:
+            with mpd_client(MPDClient) as c:
+                with _choice_lock:
+                    st = {"seq": _choice["seq"], "wanted": None, "attempts": 0, "retry_at": None}
+                while True:
+                    with QUEUE_LOCK:
+                        watch_step(c, st)
+                    time.sleep(WATCH_INTERVAL)
+        except Exception as e:  # o vigia não pode morrer: volta a ligar e continua
+            print(f"vigia do stream: {e!r}", flush=True)
+            time.sleep(5)
 
 @app.route("/ouvir", methods=["POST"])
 def listen():
@@ -1709,7 +1875,12 @@ def vote():
 @app.route("/play", methods=["POST"])
 def play():
     with mpd_client() as c:
-        c.play()
+        # Depois de o stream falhar, o ▶ tenta outra vez essa estação
+        song = watched_song(c, c.currentsong())
+        if song.get("id"):
+            c.playid(song["id"])
+        else:
+            c.play()
     return done()
 
 @app.route("/stop", methods=["POST"])
@@ -2200,4 +2371,5 @@ def update():
 
 if __name__ == "__main__":
     ensure_config_key()
+    threading.Thread(target=watch_stream, daemon=True).start()
     app.run(host="0.0.0.0", port=8080)

@@ -19,6 +19,9 @@
     // O mesmo para o estado do reprodutor: o /estado do polling pedido antes de um
     // clique (parar, mudar de estação) não pode chegar depois e desfazê-lo na barra
     var stateSeq = 0;
+    // A última falha do stream já vista (o vigia desistiu de religar): o aviso só
+    // aparece uma vez, quando muda, e não ao abrir a página (que já a mostra)
+    var lastFailed = null;
     var searchTimer = null;
 
     function setBusy(on) {
@@ -338,6 +341,8 @@
         }
         updateTitle(state.station, state.playing);
         if (state.notice) toast(state.notice.text, state.notice.ok);
+        else if (lastFailed !== null && state.failed && state.failed !== lastFailed) toast(state.failed, false);
+        lastFailed = state.failed || "";
         // A lista de estações mudou noutro aparelho, ou apareceu ou desapareceu o
         // aviso de erro: recarrega a página, mas nunca com uma janela aberta nem a
         // meio de uma seleção. Só na página da playlist que está a tocar

@@ -35,13 +35,17 @@
     </div>
     {% if view.notice %}<p class="notice ok">{{ icon("check-circle", "notice-icon") }}<span class="notice-body">{{ view.notice }}</span></p>{% endif %}
 
-    {% if view.live and status.error %}
+    {% if view.live and stream_error %}
     {# Com saída: tocar outra, procurar a rádio outra vez (o endereço pode ter mudado) ou removê-la #}
     <div class="notice danger" id="aviso">
         {{ icon("warning-circle", "notice-icon") }}
         <div class="notice-body">
-            <strong>{% if failed %}«{{ failed.name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> O endereço pode ter mudado ou a rádio pode estar em baixo.
-            <div class="small muted">{{ status.error }}</div>
+            {% if stream_lost %}
+            <strong>{{ stream_error }}</strong> A rádio pode estar em baixo ou a rede do telemóvel falhou. Carrega em ▶ para tentar outra vez.
+            {% else %}
+            <strong>{% if failed_name %}«{{ failed_name }}» não tocou.{% else %}A última rádio não tocou.{% endif %}</strong> O endereço pode ter mudado ou a rádio pode estar em baixo.
+            <div class="small muted">{{ stream_error }}</div>
+            {% endif %}
             <div class="notice-actions">
                 {% if cards %}
                 <form action="/next" method="post"><input type="hidden" name="next" value="{{ list_url }}"><button class="btn small">{{ icon("skip-forward-fill") }}<span>Tocar a seguinte</span></button></form>

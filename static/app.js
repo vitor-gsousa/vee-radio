@@ -119,7 +119,7 @@
         var saved = savedFilters();
         var inUrl = new URLSearchParams(location.search);
         document.querySelectorAll(".filters select").forEach(function (sel) {
-            if (sel.name === "para" || inUrl.has(sel.name)) return;
+            if (inUrl.has(sel.name)) return;
             var value = saved[sel.name];
             // Só valores que ainda existem na lista (um país retirado fica em "Todos")
             if (typeof value === "string" && Array.prototype.some.call(sel.options, function (o) { return o.value === value; })) {
@@ -440,7 +440,16 @@
         if (url.origin !== location.origin || /^\/(logo|static|entrar)(\/|$)/.test(url.pathname)) return;
         if (url.pathname === location.pathname && url.search === location.search) return;
         e.preventDefault();
-        load(url.pathname + url.search + url.hash, true);
+        // Outra página de resultados: o esqueleto no lugar das rádios enquanto a API
+        // responde, e depois o topo (no mesmo endereço o scroll ficava onde estava)
+        var results = a.closest(".pager") && a.closest(".results");
+        if (!results) return load(url.pathname + url.search + url.hash, true);
+        var before = results.innerHTML;
+        results.innerHTML = skeletonRows(6);
+        load(url.pathname + url.search + url.hash, true).then(function (ok) {
+            if (ok) window.scrollTo(0, 0);
+            else results.innerHTML = before;
+        });
     });
 
     // Página de uma playlist, modo Selecionar: tocar num cartão escolhe-o, e a barra
@@ -494,19 +503,43 @@
         if (t.form && t.form.id === "editar" && t.type === "checkbox") return updateSelection();
         if (t.matches(".list-tools select")) return t.form.requestSubmit();
         if (!t.closest(".filters")) return;
-        // Os filtros ficam lembrados para as outras páginas de Descobrir. A playlist de
-        // "Juntar a" não: ao voltar, é a que está a tocar
-        if (t.name !== "para") saveFilter(t.name, t.value);
+        // Os filtros ficam lembrados para as outras páginas de Descobrir
+        saveFilter(t.name, t.value);
         if (t.form.matches(".refine")) return t.form.requestSubmit();
         var query = t.form.querySelector('input[name="q"]');
         if (query && query.value.trim()) return t.form.requestSubmit();
-        // Mudou "Juntar a" sem pesquisa: a página volta com os textos e o ✓ dessa playlist
-        if (t.name === "para") {
-            var url = new URL(location.href);
-            if (t.value) url.searchParams.set("para", t.value);
-            else url.searchParams.delete("para");
-            load(url.pathname + url.search + url.hash, false);
-        }
+    });
+
+    // Menu do + nos resultados (um <details>): só um aberto de cada vez, fecha ao
+    // tocar fora ou com Esc, e abre para cima quando não cabe por cima do reprodutor
+    function closeAddMenus(except) {
+        document.querySelectorAll(".add-menu[open]").forEach(function (menu) {
+            if (menu !== except) menu.open = false;
+        });
+    }
+
+    document.addEventListener("toggle", function (e) {
+        var menu = e.target;
+        if (!menu.matches || !menu.matches(".add-menu") || !menu.open) return;
+        closeAddMenus(menu);
+        menu.classList.remove("up");
+        var list = menu.querySelector(".add-menu-list");
+        var player = document.querySelector(".player");
+        var limit = player ? player.getBoundingClientRect().top : window.innerHeight;
+        if (list.getBoundingClientRect().bottom > limit - 8 &&
+            menu.getBoundingClientRect().top - list.offsetHeight > 8) menu.classList.add("up");
+    }, true);
+
+    document.addEventListener("click", function (e) {
+        if (!e.target.closest(".add-menu")) closeAddMenus(null);
+    });
+
+    document.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape") return;
+        var open = document.querySelector(".add-menu[open]");
+        if (!open) return;
+        open.open = false;
+        open.querySelector("summary").focus();
     });
 
     document.addEventListener("submit", function (e) {

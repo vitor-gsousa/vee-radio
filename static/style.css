@@ -86,6 +86,30 @@ a { color: inherit; }
 .icon-btn.add:hover { box-shadow: inset 0 0 0 1.5px var(--text); }
 .icon-btn.done { color: var(--ok); cursor: default; }
 .icon-btn.done:hover { background: transparent; }
+/* + dos resultados: um menu com as playlists. Abre para cima perto do fundo (o script põe .up) */
+.add-menu { position: relative; flex: none; }
+.add-menu > summary { list-style: none; }
+.add-menu > summary::-webkit-details-marker { display: none; }
+.icon-btn.add.saved { color: var(--ok); box-shadow: inset 0 0 0 1.5px var(--ok); }
+.add-menu[open] > summary { background: var(--surface-3); }
+.add-menu-list {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 12; margin: 0;
+    display: flex; flex-direction: column; min-width: 220px; max-width: min(300px, calc(100vw - 32px));
+    max-height: 50vh; overflow-y: auto; padding: 6px; border-radius: 12px;
+    background: var(--surface-2); box-shadow: 0 0 0 1px var(--line), 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.add-menu.up .add-menu-list { top: auto; bottom: calc(100% + 6px); }
+.add-menu-title { padding: 6px 10px 4px; font-size: 12px; font-weight: 700; color: var(--muted); }
+.add-menu-item {
+    display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border: 0; border-radius: 8px;
+    background: none; color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.add-menu-item .i { width: 18px; height: 18px; flex: none; }
+button.add-menu-item:hover, button.add-menu-item:focus-visible { background: var(--surface-3); }
+.add-menu-item.done { color: var(--muted); cursor: default; }
+.add-menu-item.done .i { color: var(--ok); }
+.add-menu-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.add-menu-note { flex: none; font-size: 11px; font-weight: 700; color: var(--accent-fg); }
 .icon-btn.play { background: var(--accent); color: var(--accent-ink); }
 .icon-btn.play:hover { filter: brightness(1.18); background: var(--accent); }
 
@@ -146,9 +170,6 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filters select { min-width: 0; padding-top: 10px; padding-bottom: 10px; font-size: 14px; }
-.target-field { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; color: var(--muted); }
-.target-field span { flex: none; padding-left: 2px; }
-.target-field select { flex: 1; color: var(--text); font-weight: 600; }
 .search-form { display: flex; flex-direction: column; gap: 12px; }
 .search-form > .btn { align-self: flex-start; }
 .search-form, .refine, .theme-add, .url-add, .edit-panel { max-width: 900px; }
@@ -249,6 +270,10 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 
 /* Linhas: resultados, playlists e estações de uma playlist */
 .rows { display: flex; flex-direction: column; gap: 2px; }
+.pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; max-width: 900px; margin: 18px 0 8px; }
+.pager .btn { justify-self: start; }
+.pager .btn:last-child { justify-self: end; }
+.pager-num { font-size: 13px; }
 .row-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; transition: background 0.15s; }
 .row-item:hover { background: var(--surface); }
 .row-item form { margin: 0; }

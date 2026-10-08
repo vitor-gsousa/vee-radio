@@ -9,7 +9,7 @@
         <div class="page-head-text">
             {{ m.back(("/descobrir/temas" if theme.tag else "/descobrir/paises") ~ para_qs, "Temas" if theme.tag else "Países") }}
             <h1>{{ theme.label }}</h1>
-            <p class="muted">{% if theme.results %}{% if filters.ordem == 'name' %}{{ theme.results|length }} rádios, de A a Z{% else %}As {{ theme.results|length }} rádios {{ dict(orders)[filters.ordem] }}{% endif %}{% else %}Sem rádios{% endif %}</p>
+            <p class="muted">{% if theme.results %}{{ theme.results|length }} rádios, {{ dict(orders)[filters.ordem] }}{% if pages.page > 1 or pages.more %} · página {{ pages.page }}{% endif %}{% else %}Sem rádios{% endif %}</p>
         </div>
     </header>
     {# Mudar o país ou a ordenação sem voltar atrás #}
@@ -33,7 +33,8 @@
         {% endfor %}
         {# Por omissão vão para a playlist escolhida em "Juntar a" (ou a que está a tocar).
            A playlist nova é escolha explícita, porque passa a ser a que toca no lugar da atual #}
-        <label class="field" for="theme-target">Juntar todas a</label>
+        {% set paged = pages.page > 1 or pages.more %}
+        <label class="field" for="theme-target">{% if paged %}Juntar as desta página a{% else %}Juntar todas a{% endif %}</label>
         <div class="inline-form">
             <select name="target" id="theme-target">
                 {% if active %}
@@ -63,10 +64,11 @@
     {% else %}
     <div class="empty-state">
         {{ icon("radio", "empty-icon") }}
-        <p class="muted">Não há rádios {% if theme.tag and filters.pais %}deste tema neste país. Experimenta «Todos os países»{% else %}aqui{% endif %}.</p>
+        <p class="muted">{% if pages.page > 1 %}Não há mais rádios.{% else %}Não há rádios {% if theme.tag and filters.pais %}deste tema neste país. Experimenta «Todos os países»{% else %}aqui{% endif %}.{% endif %}</p>
     </div>
     {% endfor %}
     </div>
+    {{ m.pager() }}
     </div>
 
     {% else %}
@@ -97,10 +99,11 @@
         {% else %}
         <div class="empty-state">
             {{ icon("magnifying-glass", "empty-icon") }}
-            <p class="muted">Nenhuma rádio encontrada.</p>
+            <p class="muted">{% if pages.page > 1 %}Não há mais rádios.{% else %}Nenhuma rádio encontrada.{% endif %}</p>
         </div>
         {% endfor %}
         </div>
+        {{ m.pager() }}
     {% endif %}
     </div>
     {# Para quem já tem o endereço de um stream; fechado por omissão #}

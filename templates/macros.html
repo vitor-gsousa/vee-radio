@@ -1,5 +1,5 @@
 {# Peças comuns às páginas. Importado com "with context", para ver as listas
-   (países, playlists...) e a playlist escolhida em "Juntar a" #}
+   (países, playlists...) e as playlists do menu do + (add_targets) #}
 
 {# Lista de ordenações, usada nos filtros do radio-browser e na lista de estações #}
 {% macro order_select(name, options, selected) %}
@@ -19,15 +19,11 @@
 {% endmacro %}
 
 {# Filtros da pesquisa e dos temas: país, língua, qualidade e ordenação, que vão para o radio-browser.
-   À frente, "Juntar a": a playlist para onde vai o + dos resultados (por omissão, a que está a tocar) #}
+   O para (veio do "Juntar rádios" de uma playlist) passa de página em página: põe
+   essa playlist à frente no menu do + e no "Juntar as desta página a" #}
 {% macro filter_fields(country=True) %}
     <div class="filters">
-        <label class="target-field"><span>Juntar a</span>
-        <select name="para">
-            <option value="">{% if active %}{{ active }} (a tocar){% else %}Lista principal{% endif %}</option>
-            {% for pl in playlists if pl.name != active %}<option value="{{ pl.name }}"{% if para == pl.name %} selected{% endif %}>{{ pl.name }}</option>{% endfor %}
-        </select>
-        </label>
+        {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
         {% if country %}
         <select name="pais" aria-label="País">
             <option value="">Todos os países</option>
@@ -46,12 +42,14 @@
     </div>
 {% endmacro %}
 
-{# Para onde vão as rádios dos resultados #}
+{# O que fazem os botões dos resultados #}
 {% macro destination() %}
-            <p class="hint">{{ icon("play-fill") }} experimenta sem juntar · {{ icon("plus") }} junta {% if para %}a «{{ para }}» (a música não muda){% elif active %}a «{{ active }}»{% else %}à lista (que não está guardada){% endif %}</p>
+            <p class="hint">{{ icon("play-fill") }} ouve sem juntar · {{ icon("plus") }} junta a uma playlist</p>
 {% endmacro %}
 
-{# ▶ (experimenta sem juntar) e + (junta à playlist escolhida, ou ✓ se já lá está) de um stream #}
+{# ▶ (experimenta sem juntar) e + (menu com as playlists; ✓ nas que já a têm) de um
+   stream. O botão mostra ✓ quando já está em alguma. Juntar a uma que não toca só
+   muda o ficheiro: a música não muda #}
 {% macro station_buttons(url, name, favicon, uuid, back_to, label=None) %}
                 <form action="/ouvir" method="post">
                     <input type="hidden" name="url" value="{{ url }}">
@@ -61,19 +59,25 @@
                     <input type="hidden" name="next" value="{{ back_to }}">
                     <button class="icon-btn" title="Ouvir sem juntar" aria-label="Ouvir {{ name }}{% if label %} ({{ label }}){% endif %} sem juntar">{{ icon("play-fill") }}</button>
                 </form>
-                {% if url in target_urls %}
-                <span class="icon-btn done" title="Já está {% if para %}em «{{ para }}»{% else %}na lista{% endif %}" aria-label="Já está na lista">{{ icon("check-circle") }}</span>
-                {% else %}
-                <form action="/add_stream" method="post">
-                    <input type="hidden" name="url" value="{{ url }}">
-                    <input type="hidden" name="name" value="{{ name }}">
-                    <input type="hidden" name="logo" value="{{ favicon }}">
-                    <input type="hidden" name="uuid" value="{{ uuid }}">
-                    <input type="hidden" name="next" value="{{ back_to }}">
-                    {% if para %}<input type="hidden" name="para" value="{{ para }}">{% endif %}
-                    <button class="icon-btn add" title="Juntar{% if para or active %} a «{{ para or active }}»{% endif %}" aria-label="Juntar {{ name }}{% if label %} ({{ label }}){% endif %}">{{ icon("plus") }}</button>
-                </form>
-                {% endif %}
+                {% set saved = url in saved_urls %}
+                <details class="add-menu">
+                    <summary class="icon-btn add{% if saved %} saved{% endif %}" title="{% if saved %}Já está numa playlist: juntar a outra{% else %}Juntar a uma playlist{% endif %}" aria-label="Juntar {{ name }}{% if label %} ({{ label }}){% endif %} a uma playlist">{{ icon("check" if saved else "plus") }}</summary>
+                    <form action="/add_stream" method="post" class="add-menu-list">
+                        <input type="hidden" name="url" value="{{ url }}">
+                        <input type="hidden" name="name" value="{{ name }}">
+                        <input type="hidden" name="logo" value="{{ favicon }}">
+                        <input type="hidden" name="uuid" value="{{ uuid }}">
+                        <input type="hidden" name="next" value="{{ back_to }}">
+                        <span class="add-menu-title">Juntar a</span>
+                        {% for t in add_targets %}
+                        {% if url in t.urls %}
+                        <span class="add-menu-item done">{{ icon("check") }}<span class="add-menu-name">{{ t.label }}</span>{% if t.playing %}<span class="add-menu-note">a tocar</span>{% endif %}</span>
+                        {% else %}
+                        <button class="add-menu-item" name="para" value="{{ t.value }}">{{ icon("plus") }}<span class="add-menu-name">{{ t.label }}</span>{% if t.playing %}<span class="add-menu-note">a tocar</span>{% endif %}</button>
+                        {% endif %}
+                        {% endfor %}
+                    </form>
+                </details>
 {% endmacro %}
 
 {# Uma rádio nos resultados, com a melhor versão à frente. Se o radio-browser a tem
@@ -114,6 +118,18 @@
             {{ icon("playlist") }}
         {% endif %}
     </span>
+{% endmacro %}
+
+{# Páginas dos resultados do radio-browser (PAGE_SIZE de cada vez). O script
+   mostra o esqueleto nos resultados e volta ao topo #}
+{% macro pager() %}
+    {% if pages.page > 1 or pages.more %}
+    <nav class="pager" aria-label="Páginas de resultados">
+        {% if pages.page > 1 %}<a class="btn" href="{{ page_url(pages.page - 1) }}">{{ icon("caret-left") }}<span>Anteriores</span></a>{% else %}<span></span>{% endif %}
+        <span class="pager-num muted">Página {{ pages.page }}</span>
+        {% if pages.more %}<a class="btn" href="{{ page_url(pages.page + 1) }}"><span>Seguintes</span>{{ icon("caret-right") }}</a>{% else %}<span></span>{% endif %}
+    </nav>
+    {% endif %}
 {% endmacro %}
 
 {# Botão de voltar (substitui os links "← Temas") #}

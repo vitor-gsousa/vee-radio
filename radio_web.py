@@ -30,13 +30,13 @@ except ImportError:
     Image = None
 
 class BigFormRequest(Request):
-    # Com "Todas", o "Juntar todas" de um tema manda centenas de rádios, com 3
-    # campos cada; o limite do Werkzeug é de 1000 campos por formulário
+    # O "Juntar" de um tema manda uma página de rádios (PAGE_SIZE), com 4 campos
+    # cada; o limite do Werkzeug é de 1000 campos por formulário
     max_form_parts = 5000
 
 app = Flask(__name__)
 app.request_class = BigFormRequest
-# "Juntar todas" com ALL_LIMIT rádios fica bem abaixo disto; acima é abuso
+# O "Juntar" de uma página de rádios fica bem abaixo disto; acima é abuso
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 @app.template_filter("flag")
@@ -122,12 +122,16 @@ COUNTRIES = [
     ("TR", "Turquia"), ("UA", "Ucrânia"), ("VE", "Venezuela"),
 ]
 COUNTRY_LABELS = dict(COUNTRIES)
-# Ordenações da API (campo order, do maior para o menor); "random" serve para descobrir rádios novas
-# "name" mostra todas, por ordem alfabética, até ALL_LIMIT
+# Ordenações da API (campo order, do maior para o menor; "name" de A a Z); "random"
+# serve para descobrir rádios novas
 ORDERS = [("clickcount", "mais ouvidas"), ("votes", "mais votadas"), ("clicktrend", "tendências"), ("random", "aleatórias"),
-          ("name", "todas, de A a Z")]
+          ("name", "de A a Z")]
 ORDER_LABELS = dict(ORDERS)
-ALL_LIMIT = 500
+# Resultados da pesquisa, dos temas e dos países, por página: o radio-browser
+# devolve-os aos bocados (offset), por isso um tema com milhares de rádios vê-se
+# todo, página a página, com qualquer ordenação. MAX_PAGE só trava endereços absurdos
+PAGE_SIZE = 100
+MAX_PAGE = 500
 # Ordenações da lista de estações na página. Só mudam o que se vê: a playlist,
 # e o anterior/seguinte, continuam pela ordem guardada
 LIST_ORDERS = [("", "ordem da playlist"), ("clickcount", ORDER_LABELS["clickcount"]), ("votes", ORDER_LABELS["votes"]),
@@ -144,8 +148,6 @@ LANGUAGES = [
 LANGUAGE_LABELS = dict(LANGUAGES)
 # Qualidade mínima do stream, em kbps (bitrateMin da API)
 BITRATES = [64, 128, 192]
-# Quantas rádios de um tema se mostram e se juntam de uma vez (as mais ouvidas)
-THEME_LIMIT = 15
 
 STREAM_FAILED_HINT ='O endereço pode ter mudado. Procura a rádio outra vez em "Descobrir" e remove a antiga.'
 
@@ -315,12 +317,13 @@ def station_index():
     with _index_lock:
         if _index_cache["key"] == key:
             return _index_cache["info"], _index_cache["counts"], _index_cache["covers"]
-    info, counts, covers = {}, {}, {}
+    info, counts, covers, members = {}, {}, {}, {}
     for path in paths + [NAMES_FILE]:
         entries = read_m3u(path)
         if path != NAMES_FILE:
             name = os.path.basename(path)[:-len(".m3u")]
             counts[name] = len(entries)
+            members[name] = {u for u, _, _ in entries}
             # Capa da playlist, como no Spotify: os logótipos das primeiras quatro estações
             covers[name] = [(logo_key(u), n or "") for u, n, _ in entries[:4]]
         for url, name, logo in entries:
@@ -330,8 +333,13 @@ def station_index():
             if logo:
                 entry["logo"] = logo
     with _index_lock:
-        _index_cache.update(key=key, info=info, counts=counts, covers=covers)
+        _index_cache.update(key=key, info=info, counts=counts, covers=covers, members=members)
     return info, counts, covers
+
+def playlist_members():
+    # Nome da playlist -> URLs que tem (para o ✓ do menu "Juntar a"). Partilhado: só para ler
+    station_index()
+    return _index_cache["members"]
 
 def station_info():
     # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
@@ -949,7 +957,7 @@ def station_cards(items, current_id):
     return cards, list_filter, list_order
 
 def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None,
-                dashboard=None):
+                dashboard=None, pages=None):
     # Todas as páginas têm a navegação, o reprodutor e as janelas pequenas (nova
     # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
@@ -983,17 +991,27 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
     failed = next((s for s in stations if (failure and s["file"] == failure["url"])
                    or (error and s["file"] in error)), None)
     stream_error = failure["text"] if failure else error
-    # Para onde vão as rádios de Descobrir; o ✓ dos resultados é dessa playlist
+    # Menu do + nos resultados de Descobrir: as playlists para onde se pode juntar,
+    # cada uma com os URLs que já tem (✓). Primeiro a do "para" (veio do "Juntar
+    # rádios" de uma playlist), depois a que está a tocar (valor vazio: a fila)
     para = chosen_playlist()
-    target_urls = {u for u, _, _ in read_m3u(playlist_path(para))} if para else {s["file"] for s in queue}
+    active = active_playlist()
+    members = playlist_members()
+    add_targets = [{"value": "", "label": active or "Lista por guardar", "playing": True,
+                    "urls": {s["file"] for s in queue}}]
+    add_targets += [{"value": p, "label": p, "playing": False, "urls": members.get(p, set())}
+                    for p in stored_playlists if p != active]
+    add_targets.sort(key=lambda t: t["value"] != para if para else not t["playing"])
+    saved_urls = set().union(*(t["urls"] for t in add_targets))
     return render_template(template, **player, page=page, tab=tab,
-                                  stations=stations, cards=cards, target_urls=target_urls, para=para, view=view, queue_sig=queue_sig(queue),
+                                  stations=stations, cards=cards, add_targets=add_targets, saved_urls=saved_urls, para=para, view=view, queue_sig=queue_sig(queue),
                                   list_filter=list_filter, list_order=list_order, list_url=list_url,
                                   list_orders=LIST_ORDERS,
                                   playlists=playlists,
                                   results=results, query=query, filters=filters or search_filters(),
                                   themes=THEMES, countries=COUNTRIES, orders=ORDERS, languages=LANGUAGES,
                                   bitrates=BITRATES, theme=theme, dashboard=dashboard,
+                                  pages=pages or {"page": 1, "more": False},
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
                                   removed=removed_context(),
@@ -1307,30 +1325,44 @@ def initials_response(name):
 # mostrar o ✓, o que repetia o pedido ao radio-browser (até 1000 rádios) por cada
 # rádio juntada. Os resultados ficam uns minutos em memória
 SEARCH_CACHE_SECONDS = 300
-SEARCH_CACHE_SIZE = 8
+SEARCH_CACHE_SIZE = 24
 _search_cache = {}
 _search_lock = threading.Lock()
 
-def find_stations(filters, limit, **criteria):
-    key = (tuple(sorted(filters.items())), limit, tuple(sorted(criteria.items())))
+def page_number():
+    page = request.args.get("pag", "")
+    return int(page) if page.isdigit() and 1 <= int(page) <= MAX_PAGE else 1
+
+@app.template_global()
+def page_url(page):
+    # Este endereço noutra página de resultados (a 1 sem o pag)
+    args = request.args.to_dict(flat=False)
+    args.pop("pag", None)
+    if page > 1:
+        args["pag"] = [str(page)]
+    return request.path + ("?" + urllib.parse.urlencode(args, doseq=True) if args else "")
+
+def find_stations(filters, page, **criteria):
+    # Uma página de resultados: (rádios, há mais páginas)
+    key = (tuple(sorted(filters.items())), page, tuple(sorted(criteria.items())))
     now = time.time()
     with _search_lock:
         hit = _search_cache.get(key)
         if hit and now - hit[0] < SEARCH_CACHE_SECONDS:
-            return list(hit[1])
-    results = search_stations(filters, limit, **criteria)
+            return list(hit[1]), hit[2]
+    results, more = search_stations(filters, page, **criteria)
     with _search_lock:
-        _search_cache[key] = (now, results)
+        _search_cache[key] = (now, results, more)
         for old in sorted(_search_cache, key=lambda k: _search_cache[k][0])[:-SEARCH_CACHE_SIZE]:
             del _search_cache[old]
-    return list(results)
+    return list(results), more
 
-def search_stations(filters, limit, **criteria):
+def search_stations(filters, page, **criteria):
     # Diretório público de rádios (radio-browser.info); o "all" encaminha para um servidor ativo.
-    # Pede mais do que o limite porque os repetidos e os HLS ficam de fora.
-    if filters["ordem"] == "name":
-        limit = ALL_LIMIT
-    params = {"limit": limit * 2, "hidebroken": "true", "order": filters["ordem"],
+    # Cada página são PAGE_SIZE entradas da API; os repetidos e os HLS ficam de
+    # fora e as versões da mesma rádio juntam-se, por isso mostram-se um pouco menos.
+    # Há mais páginas quando a API devolveu a página inteira
+    params = {"limit": PAGE_SIZE, "offset": (page - 1) * PAGE_SIZE, "hidebroken": "true", "order": filters["ordem"],
               "reverse": "false" if filters["ordem"] == "name" else "true", **criteria}
     if filters["pais"]:
         params["countrycode"] = filters["pais"]
@@ -1349,7 +1381,7 @@ def search_stations(filters, limit, **criteria):
         # A API ordena os nomes tal como estão, com espaços e pontuação à frente
         # (" M80", ". Abdulbasit") e maiúsculas antes de minúsculas
         results.sort(key=lambda s: sort_key(s["name"]))
-    return results[:limit]
+    return results, len(stations) >= PAGE_SIZE
 
 def clean_stations(stations):
     # A mesma rádio aparece muitas vezes repetida com o mesmo URL. Os streams HLS
@@ -1470,7 +1502,7 @@ def remember_versions(urls):
     # Ao juntar ou ouvir a partir dos resultados: as versões estão na pesquisa em memória
     urls = set(urls)
     with _search_lock:
-        cached = [r for _, results in _search_cache.values() for r in results]
+        cached = [r for _, results, _ in _search_cache.values() for r in results]
     for r in cached:
         alts = r.get("variants") or []
         if len(alts) > 1 and urls & {v["url"] for v in alts}:
@@ -1531,11 +1563,12 @@ def search():
     if not query:
         return render_page("discover.html", "descobrir", filters=filters, tab="nome")
     try:
-        results = find_stations(filters, 25, name=query)
+        results, more = find_stations(filters, page_number(), name=query)
     except (OSError, ValueError):
         # Apanhado aqui para não cair no handler de OSError, que culpa o MPD
         return error_page(*API_DOWN)
-    return render_page("discover.html", "descobrir", results, query, filters, tab="nome")
+    return render_page("discover.html", "descobrir", results, query, filters, tab="nome",
+                       pages={"page": page_number(), "more": more})
 
 @app.route("/tema")
 def theme():
@@ -1552,10 +1585,11 @@ def theme():
     else:
         label = THEME_LABELS.get(tag) or COUNTRY_LABELS[filters["pais"]]
     try:
-        results = find_stations(filters, THEME_LIMIT, **criteria)
+        results, more = find_stations(filters, page_number(), **criteria)
     except (OSError, ValueError):
         return error_page(*API_DOWN)
-    return render_page("discover.html", "descobrir", filters=filters, tab="tema", theme={"tag": tag, "label": label, "results": results})
+    return render_page("discover.html", "descobrir", filters=filters, tab="tema", theme={"tag": tag, "label": label, "results": results},
+                       pages={"page": page_number(), "more": more})
 
 @app.route("/add_theme", methods=["POST"])
 def add_theme():

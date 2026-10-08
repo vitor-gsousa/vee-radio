@@ -251,7 +251,13 @@
 
     async function handle(response, url, push) {
         var next = response.headers.get("X-Location");
-        if (next) return load(next, false);
+        if (next) {
+            // X-Notice: o que se fez (por exemplo, para onde foi a rádio), depois da página nova
+            var notice = response.headers.get("X-Notice");
+            var ok = await load(next, false);
+            if (ok && notice) toast(decodeURIComponent(notice), true);
+            return ok;
+        }
         var type = response.headers.get("Content-Type") || "";
         if (type.indexOf("application/json") !== -1) return updatePlayer(await response.json());
         if (response.status === 204) return true;

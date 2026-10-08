@@ -1143,9 +1143,11 @@ def redirect_for_script(response):
     # O fetch segue os redirects sozinho e perde o #janela do destino; para o
     # script, o redirect passa a um cabeçalho e é ele que pede a página nova
     if from_script() and response.status_code in (301, 302, 303):
-        location = response.headers["Location"]
+        location, notice = response.headers["Location"], response.headers.get("X-Notice")
         response = Response(status=204)
         response.headers["X-Location"] = location
+        if notice:
+            response.headers["X-Notice"] = notice
     return response
 
 @app.route("/estado")
@@ -1175,6 +1177,16 @@ def back():
             and not CONTROL_RE.search(next_url):
         return redirect(next_url)
     return redirect("/")
+
+def with_notice(response, text):
+    # Mensagem curta para o script mostrar depois de seguir o redirect (por exemplo,
+    # para onde foi a rádio juntada). Vai em URL-encoding porque os cabeçalhos são
+    # ASCII; sem script não aparece, e a página mostra o ✓
+    response.headers["X-Notice"] = urllib.parse.quote(text)
+    return response
+
+def plural(n, one, many):
+    return f"{n} {one if n == 1 else many}"
 
 def done():
     # Os botões do reprodutor devolvem o estado ao script, em vez da página inteira
@@ -1626,16 +1638,22 @@ def add_theme():
                 c.command_list_end()
             write_m3u(path, entries + new)
             sync_active(c)
-            return redirect(view_url(target))
+            return with_notice(redirect(view_url(target)), joined_text(len(new), target))
         os.makedirs(PLAYLIST_DIR, exist_ok=True)
         write_m3u(path, entries + new)
         if existed:
-            return redirect(view_url(target))
+            return with_notice(redirect(view_url(target)), joined_text(len(new), target))
         # Playlist nova: passa a ser a que toca, como em "Nova playlist",
         # e a rádio que está a tocar continua
         if not switch_queue(c, target) and new:
             c.play(0)
-    return redirect(view_url(target))
+    return with_notice(redirect(view_url(target)),
+                       f"Playlist «{target}» criada com {plural(len(new), 'rádio', 'rádios')}.")
+
+def joined_text(n, target):
+    if not n:
+        return f"Já estavam todas em «{target}»."
+    return f"{plural(n, 'rádio juntada', 'rádios juntadas')} a «{target}»."
 
 # Os cartões usam o id da entrada na fila e não a posição: se a lista mudou
 # noutro aparelho depois de a página ser feita, a posição já é de outra estação
@@ -1962,12 +1980,14 @@ def add_stream():
                     os.remove(os.path.join(LOGO_DIR, logo_key(url) + ".falhou"))
                 except FileNotFoundError:
                     pass
+            label = f"«{name}»" if name else "A rádio"
             with mpd_client() as c:
                 target = chosen_playlist()
                 if target:
                     # Para outra playlist: só o ficheiro, a música não muda
-                    append_to_playlist(c, target, [(url, name or None, logo or None)])
-                    return back()
+                    if append_to_playlist(c, target, [(url, name or None, logo or None)]):
+                        return with_notice(back(), f"{label} juntada a «{target}».")
+                    return with_notice(back(), f"{label} já estava em «{target}».")
                 # A rádio que se estava a experimentar já está na fila: deixa de ser
                 # experiência e passa a ser da lista, no mesmo sítio
                 preview = read_preview()
@@ -1980,6 +2000,10 @@ def add_stream():
                     c.add(url)
                 if added or promoted:
                     sync_active(c)
+                where = f"«{active_playlist()}»" if active_playlist() else "à lista que está a tocar"
+                if added or promoted:
+                    return with_notice(back(), f"{label} juntada a {where}.")
+                return with_notice(back(), f"{label} já estava em {where}.")
     return back()
 
 @app.route("/remove/<int:song_id>", methods=["POST"])

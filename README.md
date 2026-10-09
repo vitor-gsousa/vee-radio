@@ -160,8 +160,13 @@ Cada estação aparece num cartão com o seu logótipo:
 - **De onde vem:** do atributo `tvg-logo` do `#EXTINF`, por exemplo `#EXTINF:-1 tvg-logo="https://.../logo.png",Antena 1`.
   - As rádios encontradas na pesquisa ou nos temas trazem-no do radio-browser.info.
   - Para as outras, o comando procura o URL do stream no radio-browser.info.
-- **Onde fica guardado:** o telemóvel descarrega cada logótipo uma vez e guarda-o em `~/.cache/vee-radio/logos`.
-- **Sem logótipo:** o cartão mostra as iniciais da rádio. Para voltar a descarregar os logótipos, apaga essa pasta.
+  - Se não houver logótipo, ou se for um favicon pequeno que fica desfocado, o comando procura um maior no site da rádio: primeiro o ícone (`apple-touch-icon`) e depois a imagem de partilha (`og:image`), recortada ao centro.
+- **Onde fica guardado:** o telemóvel descarrega cada logótipo uma vez e guarda-o em `~/.cache/vee-radio/logos`. Os logótipos que faltam são descarregados em segundo plano, no arranque e quando se juntam rádios. Por isso, a página raramente fica à espera deles.
+- **Mudar à mão:** no reprodutor aberto, "Mudar o logótipo" mostra as imagens encontradas no radio-browser.info e no site da rádio.
+  - Podes escolher uma delas ou colar o endereço de outra imagem.
+  - A escolha fica em todas as playlists que têm a rádio.
+  - "Automático" desfaz a escolha e volta a procurar o logótipo.
+- **Sem logótipo:** o cartão mostra as iniciais da rádio. Para voltar a descarregar os logótipos, apaga essa pasta e o ficheiro `~/.cache/vee-radio/logos.json`.
 
 ## Resolução de problemas
 

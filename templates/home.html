@@ -25,7 +25,7 @@
     <section class="now-card">
         {% if current_station %}
         <a class="now-main" href="#tocar">
-            <img class="now-logo" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">
+            <img class="now-logo" src="{{ logo_src(current_key, current_station) }}" alt="">
             <span class="now-text">
                 <span class="eyebrow">{% if preview %}A experimentar{% elif status.state == 'play' %}A tocar agora{% elif status.state == 'pause' %}Em pausa{% else %}Parado{% endif %}</span>
                 <span class="now-station">{{ current_station }}</span>

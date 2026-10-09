@@ -7,7 +7,7 @@
    enquanto não chegam, a barra mostra só o que vem do MPD.
    O /estado devolve este ficheiro inteiro e o script troca-o (a janela vai com ele) #}
 {% macro logo(cls) %}
-    {% if current_key %}<img class="{{ cls }}" src="/logo/{{ current_key }}?n={{ current_station|urlencode }}" alt="">{% else %}<span class="{{ cls }} empty">{{ icon("radio") }}</span>{% endif %}
+    {% if current_key %}<img class="{{ cls }}" src="{{ logo_src(current_key, current_station) }}" alt="">{% else %}<span class="{{ cls }} empty">{{ icon("radio") }}</span>{% endif %}
 {% endmacro %}
 {% macro station_actions() %}
     {% if details.homepage %}
@@ -109,6 +109,9 @@
             {{ volume_bar() }}
             {% if tile_id %}
             <a class="btn ghost show-in-list" href="{{ list_href }}#e{{ tile_id }}">{{ icon("list-magnifying-glass") }}<span>Mostrar na lista</span></a>
+            {% endif %}
+            {% if current_url %}
+            <a class="btn ghost show-in-list" href="/logotipo?url={{ current_url|urlencode }}">{{ icon("pencil-simple") }}<span>Mudar o logótipo</span></a>
             {% endif %}
         </div>
     </div>

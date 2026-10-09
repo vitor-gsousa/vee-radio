@@ -506,6 +506,23 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .controls.big .play-btn .i { width: 28px; height: 28px; }
 .show-in-list { align-self: center; }
 
+/* Mudar o logótipo (/logotipo) */
+.logo-edit-current { width: 148px; height: 148px; flex: none; border-radius: 14px; object-fit: contain; background: #fff; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); }
+.logo-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 12px; margin: 0 0 24px; }
+.logo-choices form { margin: 0; }
+.logo-choice {
+    display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; padding: 12px; border: 0; border-radius: var(--radius);
+    background: var(--surface); color: var(--text); font: inherit; cursor: pointer;
+}
+.logo-choice:hover { background: var(--surface-2); }
+.logo-choice.on { box-shadow: inset 0 0 0 2px var(--accent-fg); }
+.logo-choice .thumb { width: 96px; height: 96px; }
+.logo-choice .thumb.empty .i { width: 36px; height: 36px; }
+.logo-choice-label { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); text-align: center; overflow-wrap: anywhere; }
+.logo-choice-label .i { width: 14px; height: 14px; color: var(--accent-fg); }
+.logo-manual { margin: 0 0 20px; max-width: 560px; }
+.logo-manual .inline-form input { flex: 1; min-width: 0; }
+
 /* Mensagens curtas, carregamento e esqueletos */
 .toast {
     position: fixed; left: 50%; bottom: calc(var(--nav-h) + var(--mini-h) + var(--safe) + 22px); z-index: 40; transform: translateX(-50%);

@@ -2,11 +2,13 @@ import gzip
 import hashlib
 import hmac
 import html
+import html.parser
 import http.client
 import io
 import ipaddress
 import json
 import os
+import queue
 import re
 import secrets
 import socket
@@ -17,7 +19,7 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from contextlib import contextmanager
 
 from flask import Flask, Request, Response, g, jsonify, render_template, request, redirect, url_for
@@ -75,6 +77,20 @@ LOGO_URL_RE = re.compile(r"^https?://[^\s\"',()\\]+$")
 LOGO_MAX_BYTES = 512 * 1024
 # Depois de uma falha, só volta a tentar descarregar o logótipo passado um dia
 LOGO_RETRY_SECONDS = 24 * 3600
+# De onde veio cada logótipo que não é o do #EXTINF (um ícone do site da rádio, por
+# exemplo): URL do stream -> {"logo", "kind", "from", "t"}. Se o ficheiro da imagem
+# tiver de ser descarregado outra vez, vai-se direto a esse endereço
+LOGO_SOURCES_FILE = os.path.expanduser("~/.cache/vee-radio/logos.json")
+# Do site da rádio só interessa o início, onde está o <head> com os ícones
+LOGO_PAGE_MAX_BYTES = 256 * 1024
+# Abaixo disto (em px) o logótipo é um favicon que fica desfocado no cartão:
+# procura-se um maior no site da rádio, e este só fica se não houver outro
+LOGO_MIN_SIZE = 64
+# Imagens a experimentar por estação, para uma rádio não pôr o telemóvel a descarregar meio site
+LOGO_MAX_TRIES = 5
+# Quanto o pedido de um logótipo espera pela descarga. Depois mostra as iniciais e
+# a descarga continua em segundo plano, para a próxima vez que a página abrir
+LOGO_WAIT_SECONDS = 3
 # Cliques e votos das estações no radio-browser, para ordenar a lista pelas mais
 # ouvidas, votadas ou em tendência: URL do stream -> {"uuid", "clickcount", "votes", "clicktrend", "t"}
 STATS_FILE = os.path.expanduser("~/.cache/vee-radio/stats.json")
@@ -417,12 +433,21 @@ class PublicRedirects(urllib.request.HTTPRedirectHandler):
 _public_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), PublicHTTPHandler,
                                              PublicHTTPSHandler, PublicRedirects)
 
-def fetch_public(url, limit):
+def open_public(url):
     if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
         raise ValueError(f"endereço recusado: {url}")
     req = urllib.request.Request(url, headers={"User-Agent": "vee-radio/1.0"})
-    with _public_opener.open(req, timeout=8) as r:
+    return _public_opener.open(req, timeout=8)
+
+def fetch_public(url, limit):
+    with open_public(url) as r:
         return r.read(limit + 1)
+
+def fetch_public_page(url, limit):
+    # Como o fetch_public, mais o endereço final (depois dos redirecionamentos),
+    # que é a base dos links relativos da página
+    with open_public(url) as r:
+        return r.read(limit), r.geturl()
 
 def api_get(path, **params):
     return json.loads(fetch(API + path + "?" + urllib.parse.urlencode(params), 4 * 1024 * 1024))
@@ -442,12 +467,73 @@ def to_int(value):
     except (TypeError, ValueError):
         return 0
 
-def lookup_logo(stream_url):
-    # Só procura pelo URL exato do stream: pelo nome aparecem rádios de outros países
-    for s in api_stations("/json/stations/byurl", url=stream_url):
-        if LOGO_URL_RE.match(s.get("favicon") or ""):
-            return s["favicon"]
-    return None
+def lookup_station_links(stream_url):
+    # (favicon, site da rádio) no radio-browser. Só procura pelo URL exato do
+    # stream (pelo nome aparecem rádios de outros países) ou pelo uuid guardado
+    # quando se juntou a rádio: o byurl nem sempre encontra o url_resolved
+    favicon = homepage = None
+    found = api_stations("/json/stations/byurl", url=stream_url)
+    uuid = load_stats().get(stream_url, {}).get("uuid") or ""
+    if not found and UUID_RE.match(uuid):
+        found = api_stations("/json/stations/byuuid", uuids=uuid)
+    for s in found:
+        if not favicon and LOGO_URL_RE.match(s.get("favicon") or ""):
+            favicon = s["favicon"]
+        if not homepage and HOMEPAGE_RE.match(s.get("homepage") or ""):
+            homepage = s["homepage"]
+    return favicon, homepage
+
+def icon_size(sizes, default):
+    # Maior lado declarado em sizes="32x32 180x180"; "any" é um SVG, que serve a qualquer tamanho
+    sizes = (sizes or "").lower()
+    if "any" in sizes:
+        return 1024
+    found = [int(n) for n in re.findall(r"(\d+)x\d+", sizes)]
+    return max(found) if found else default
+
+class PageIcons(html.parser.HTMLParser):
+    # Ícones e imagem de partilha declarados no <head> do site da rádio
+    def __init__(self):
+        super().__init__()
+        self.icons = []  # (tamanho, href)
+        self.share = []  # og:image e twitter:image, pela ordem da página
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: v or "" for k, v in attrs}
+        if tag == "link" and a.get("href"):
+            rel = a.get("rel", "").lower().split()
+            if "apple-touch-icon" in rel or "apple-touch-icon-precomposed" in rel:
+                self.icons.append((icon_size(a.get("sizes"), 180), a["href"]))
+            elif "icon" in rel:
+                # "shortcut icon" também conta; o "mask-icon" não, que é só uma silhueta
+                svg = a.get("type") == "image/svg+xml" or a["href"].lower().split("?")[0].endswith(".svg")
+                self.icons.append((icon_size(a.get("sizes"), 1024 if svg else 16), a["href"]))
+        elif tag == "meta" and a.get("content"):
+            prop = (a.get("property") or a.get("name") or "").lower()
+            if prop in ("og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src"):
+                self.share.append(a["content"])
+
+def homepage_logos(homepage):
+    # Logótipos do site da rádio, do melhor para o pior: os ícones grandes (o
+    # apple-touch-icon é quadrado e feito para isto), a imagem de partilha
+    # (og:image, quase sempre um cartaz largo, que é recortado) e um ícone pequeno
+    data, base = fetch_public_page(homepage, LOGO_PAGE_MAX_BYTES)
+    parser = PageIcons()
+    try:
+        parser.feed(data.decode("utf-8", "replace"))
+        parser.close()
+    except Exception:
+        pass  # HTML estranho: fica o que já se leu
+    icons = sorted(parser.icons, key=lambda i: -i[0])
+    found = [(href, "icon") for size, href in icons if size >= LOGO_MIN_SIZE][:2]
+    found += [(href, "share") for href in parser.share[:1]]
+    found += [(href, "icon") for size, href in icons if size < LOGO_MIN_SIZE][:1]
+    logos = []
+    for href, kind in found:
+        url = urllib.parse.urljoin(base, href.strip())
+        if LOGO_URL_RE.match(url) and url not in (u for u, _ in logos):
+            logos.append((url, kind))
+    return logos
 
 # A barra (em segundo plano), a ordenação da lista e os votos escrevem no mesmo
 # ficheiro; cada escrita relê-o e junta só as suas entradas
@@ -901,6 +987,7 @@ def player_context(status, current, info):
             "current_station": station,
             "current_title": clean_title(current.get("title", "")),
             "current_key": logo_key(current["file"]) if current.get("file") else "",
+            "current_url": current.get("file") or "",
             "current_id": current.get("id") if playing else None,
             # Cartão da estação atual, mesmo parada; a que se experimenta não tem
             "tile_id": current.get("id") if current.get("file") and not preview else None,
@@ -914,7 +1001,8 @@ def with_sig(player):
     parts = [player["current_station"], player["current_title"], player["current_key"], player["status"].get("state"),
              player["volume"], player["has_stations"], player["kbps"], d.get("countrycode"), ",".join(d.get("tags") or []),
              d.get("homepage"), d.get("uuid"), d.get("votes"), player["voted"], bool(player["preview"]), player["active"], player["tile_id"],
-             ",".join(v["url"] for v in player["versions"]), player["stream_note"]]
+             ",".join(v["url"] for v in player["versions"]), player["stream_note"],
+             logo_versions().get(player["current_key"])]
     player["sig"] = hashlib.sha1("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()[:12]
     return player
 
@@ -957,7 +1045,7 @@ def station_cards(items, current_id):
     return cards, list_filter, list_order
 
 def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None,
-                dashboard=None, pages=None):
+                dashboard=None, pages=None, **extra):
     # Todas as páginas têm a navegação, o reprodutor e as janelas pequenas (nova
     # playlist, configurações); page diz qual dos separadores está aceso
     with mpd_client() as c:
@@ -1015,7 +1103,7 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
                                   removed=removed_context(),
-                                  config=config_context() if can_configure() else None)
+                                  config=config_context() if can_configure() else None, **extra)
 
 def tunnel_host():
     try:
@@ -1256,39 +1344,202 @@ def logo(key):
         return image_response(data)
     except FileNotFoundError:
         pass
-    failed = path + ".falhou"
-    if os.path.exists(failed) and time.time() - os.path.getmtime(failed) < LOGO_RETRY_SECONDS:
+    if logo_failed(path):
         return initials_response(name)
-    info = station_info()
-    stream_url = next((u for u in info if logo_key(u) == key), None)
+    stream_url = next((u for u in station_info() if logo_key(u) == key), None)
     if stream_url is None:
         with mpd_client() as c:
             stream_url = next((s["file"] for s in c.playlistinfo() if logo_key(s["file"]) == key), None)
     if stream_url is None:
         return initials_response(name)
-    os.makedirs(LOGO_DIR, exist_ok=True)
-    transient = False
-    preview = read_preview()
-    known_logo = info.get(stream_url, {}).get("logo")
-    if not known_logo and preview and preview["url"] == stream_url:
-        known_logo = preview.get("logo")
     try:
-        logo_url = known_logo or lookup_logo(stream_url)
-        data = fetch_public(logo_url, LOGO_MAX_BYTES) if logo_url else b""
-    except (OSError, ValueError) as e:
-        data = b""
-        # Sem rede ou com o servidor em baixo volta a tentar daqui a uma hora; um
-        # 404 ou uma resposta que não é imagem só amanhã
-        transient = isinstance(e, OSError) and not (isinstance(e, urllib.error.HTTPError) and e.code < 500)
-    if len(data) > LOGO_MAX_BYTES or not image_type(data):
-        open(failed, "w").close()
+        data = logo_job(stream_url).result(timeout=LOGO_WAIT_SECONDS)
+    except FutureTimeout:
+        # Ainda a descarregar (o site da rádio é lento): as iniciais por agora, sem
+        # ficarem guardadas no browser, e o logótipo aparece da próxima vez
+        return initials_response(name, cache=False)
+    return image_response(data) if data else initials_response(name)
+
+def logo_failed(path):
+    # Falhou há pouco: não se volta a tentar antes de LOGO_RETRY_SECONDS
+    try:
+        return time.time() - os.path.getmtime(path + ".falhou") < LOGO_RETRY_SECONDS
+    except OSError:
+        return False
+
+def logo_missing(stream_url):
+    path = os.path.join(LOGO_DIR, logo_key(stream_url))
+    return not os.path.exists(path) and not logo_failed(path)
+
+def transient_error(e):
+    # Sem rede ou com o servidor em baixo volta a tentar daqui a uma hora; um 404
+    # ou uma resposta que não é imagem só amanhã
+    return isinstance(e, OSError) and not (isinstance(e, urllib.error.HTTPError) and e.code < 500)
+
+# Descargas de logótipos: poucas de cada vez, para não pesar no telemóvel, e uma
+# só por estação, mesmo que várias páginas (ou aparelhos) a peçam ao mesmo tempo.
+# RLock: um trabalho que já acabou corre o add_done_callback logo, com o lock na mão
+_logo_pool = ThreadPoolExecutor(max_workers=3)
+_logo_jobs = {}
+_logo_jobs_lock = threading.RLock()
+
+def logo_job(stream_url):
+    key = logo_key(stream_url)
+    with _logo_jobs_lock:
+        job = _logo_jobs.get(key)
+        if job is None:
+            job = _logo_jobs[key] = _logo_pool.submit(fetch_logo_safely, stream_url)
+            job.add_done_callback(lambda _: forget_logo_job(key))
+        return job
+
+def forget_logo_job(key):
+    with _logo_jobs_lock:
+        _logo_jobs.pop(key, None)
+
+def fetch_logo_safely(stream_url):
+    try:
+        return fetch_logo(stream_url)
+    except Exception as e:  # um site estranho não pode deixar o pedido sem resposta
+        print(f"logótipo de {stream_url}: {e!r}", flush=True)
+        return b""
+
+# Logótipos que faltam, a descarregar em segundo plano (no arranque e quando se
+# juntam rádios), para a página não ficar à espera deles. Vão um de cada vez para o
+# _logo_pool, para os pedidos das páginas abertas passarem à frente
+_logo_warm_queue = queue.Queue()
+
+def warm_logos(urls):
+    for url in urls:
+        _logo_warm_queue.put(url)
+
+def logo_warmer():
+    while True:
+        url = _logo_warm_queue.get()
+        if logo_missing(url):
+            logo_job(url).result()
+
+LOGO_SOURCES_LOCK = threading.Lock()
+
+def logo_sources():
+    try:
+        with open(LOGO_SOURCES_FILE, encoding="utf-8") as f:
+            sources = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+    return sources if isinstance(sources, dict) else {}
+
+def remember_logo_source(stream_url, entry):
+    # O "v" (quando o logótipo foi mudado à mão) fica: está nos URLs das imagens
+    with LOGO_SOURCES_LOCK:
+        sources = logo_sources()
+        old = sources.get(stream_url)
+        if isinstance(old, dict) and old.get("v") and "v" not in entry:
+            entry = {**entry, "v": old["v"]}
+        sources[stream_url] = entry
+        tmp = f"{LOGO_SOURCES_FILE}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(sources, f)
+        os.replace(tmp, LOGO_SOURCES_FILE)
+
+def saved_logo(stream_url, known):
+    # (URL, tipo) do dicionário, só enquanto o #EXTINF for o mesmo de quando foi escrito
+    saved = logo_sources().get(stream_url)
+    if isinstance(saved, dict) and saved.get("from") == known and LOGO_URL_RE.match(saved.get("logo") or ""):
+        return saved["logo"], saved.get("kind", "icon")
+    return None
+
+# Os logótipos ficam um dia no browser (image_response): mudar um à mão muda o
+# "v" do seu URL, para o browser o ir buscar outra vez. Chave do logótipo -> v
+_logo_versions = {"key": None, "map": {}}
+
+def logo_versions():
+    sig = file_sig(LOGO_SOURCES_FILE)
+    if _logo_versions["key"] != sig:
+        _logo_versions.update(key=sig, map={logo_key(u): int(e["v"]) for u, e in logo_sources().items()
+                                             if isinstance(e, dict) and isinstance(e.get("v"), (int, float))})
+    return _logo_versions["map"]
+
+@app.template_global()
+def logo_src(key, name):
+    v = logo_versions().get(key)
+    return f"/logo/{key}?n={urllib.parse.quote(name or '')}" + (f"&v={v}" if v else "")
+
+def known_logo(stream_url):
+    # O logótipo do #EXTINF, ou o da rádio que se está a experimentar
+    known = station_info().get(stream_url, {}).get("logo")
+    preview = read_preview()
+    if not known and preview and preview["url"] == stream_url:
+        known = preview.get("logo")
+    return known
+
+def fetch_logo(stream_url):
+    # Procura o logótipo, do mais certo para o menos certo, e guarda o primeiro que
+    # serve: o endereço que já resultou antes, o do #EXTINF, o favicon do
+    # radio-browser e os do site da rádio. Um favicon pequeno só fica se não houver
+    # outro maior. Devolve os dados, ou b"" quando não há logótipo
+    path = os.path.join(LOGO_DIR, logo_key(stream_url))
+    try:
+        with open(path, "rb") as f:  # outro pedido acabou de o descarregar
+            return f.read()
+    except FileNotFoundError:
+        pass
+    if logo_failed(path):
+        return b""
+    os.makedirs(LOGO_DIR, exist_ok=True)
+    known = known_logo(stream_url)
+    saved = saved_logo(stream_url, known)
+    transient = False
+
+    def candidates():
+        nonlocal transient
+        if saved:
+            yield saved
+        yield known, "icon"
+        try:
+            favicon, homepage = lookup_station_links(stream_url)
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            transient |= transient_error(e)
+            favicon = homepage = None
+        yield favicon, "icon"
+        homepage = homepage or load_stats().get(stream_url, {}).get("homepage")
+        if homepage and HOMEPAGE_RE.match(homepage):
+            try:
+                yield from homepage_logos(homepage)
+            except (OSError, ValueError, http.client.HTTPException) as e:
+                transient |= transient_error(e)
+
+    tried, best = set(), None
+    for url, kind in candidates():
+        if not url or url in tried:
+            continue
+        if len(tried) >= LOGO_MAX_TRIES:
+            break
+        tried.add(url)
+        try:
+            data = fetch_public(url, LOGO_MAX_BYTES)
+        except (OSError, ValueError, http.client.HTTPException) as e:
+            transient |= transient_error(e)
+            continue
+        if len(data) > LOGO_MAX_BYTES or not image_type(data):
+            continue
+        data = square_logo(data) if kind == "share" else data
+        small = logo_too_small(data)
+        if not best or not small:
+            best = (data, url, kind)
+        if not small:
+            break
+    if not best:
+        open(path + ".falhou", "w").close()
         if transient:
             retry_at = time.time() - LOGO_RETRY_SECONDS + STATS_RETRY_SECONDS
-            os.utime(failed, (retry_at, retry_at))
-        return initials_response(name)
+            os.utime(path + ".falhou", (retry_at, retry_at))
+        return b""
+    data, url, kind = best
+    if url != known:
+        remember_logo_source(stream_url, {"logo": url, "kind": kind, "from": known, "t": time.time()})
     data = shrink_logo(data)
     write_logo(path, data)
-    return image_response(data)
+    return data
 
 def write_logo(path, data):
     # Ficheiro à parte e troca de uma vez: outro pedido ao mesmo tempo nunca serve
@@ -1320,6 +1571,38 @@ def shrink_logo(data):
     smaller = out.getvalue()
     return smaller if len(smaller) < len(data) else data
 
+def logo_too_small(data):
+    # Sem Pillow não se sabe o tamanho, e um SVG serve a qualquer tamanho
+    if Image is None or image_type(data) in (None, "image/svg+xml"):
+        return False
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return max(im.size) < LOGO_MIN_SIZE
+    except Exception:
+        return False
+
+def square_logo(data):
+    # A imagem de partilha (og:image) é quase sempre larga (1200x630) e o logótipo
+    # costuma estar ao meio: fica o quadrado do centro, já no tamanho dos cartões.
+    # Sem Pillow fica inteira, e o cartão mostra-a com faixas brancas
+    if Image is None or image_type(data) in (None, "image/svg+xml"):
+        return data
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            w, h = im.size
+            side = min(w, h)
+            left, top = (w - side) // 2, (h - side) // 2
+            square = im.crop((left, top, left + side, top + side))
+            square.thumbnail((LOGO_SIZE, LOGO_SIZE))
+            out = io.BytesIO()
+            if square.mode in ("RGBA", "LA", "P"):
+                square.convert("RGBA").save(out, "PNG", optimize=True)
+            else:
+                square.convert("RGB").save(out, "JPEG", quality=85)
+    except Exception:
+        return data
+    return out.getvalue()
+
 def image_response(data):
     r = Response(data, mimetype=image_type(data) or "application/octet-stream")
     r.headers["Cache-Control"] = "public, max-age=86400"
@@ -1328,10 +1611,142 @@ def image_response(data):
     r.headers["X-Content-Type-Options"] = "nosniff"
     return r
 
-def initials_response(name):
+def initials_response(name, cache=True):
     r = Response(initials_svg(name), mimetype="image/svg+xml")
-    r.headers["Cache-Control"] = "public, max-age=3600"
+    r.headers["Cache-Control"] = "public, max-age=3600" if cache else "no-store"
     return r
+
+# Mudar o logótipo à mão (página /logotipo, aberta no reprodutor). As opções vêm do
+# radio-browser e do site da rádio, por isso ficam uns minutos em memória
+LOGO_CHOICES_SECONDS = 600
+LOGO_CHOICES_SIZE = 20
+_logo_choices_cache = {}
+LOGO_KIND_LABELS = {"icon": "Ícone do site", "share": "Imagem de partilha (recortada)"}
+
+def known_stream(stream_url):
+    # Só as rádios das playlists ou da fila (a que se experimenta está na fila): a
+    # página vai buscar endereços à internet e não pode servir para outros
+    if stream_url in station_info():
+        return True
+    with mpd_client() as c:
+        return any(s["file"] == stream_url for s in c.playlistinfo())
+
+def found_logos(stream_url):
+    # [(URL, tipo, origem)] do radio-browser e do site da rádio
+    now = time.time()
+    hit = _logo_choices_cache.get(stream_url)
+    if hit and now - hit[0] < LOGO_CHOICES_SECONDS:
+        return hit[1]
+    found = []
+    try:
+        favicon, homepage = lookup_station_links(stream_url)
+    except (OSError, ValueError, http.client.HTTPException):
+        favicon = homepage = None
+    if favicon:
+        found.append((favicon, "icon", "Favicon do radio-browser"))
+    homepage = homepage or load_stats().get(stream_url, {}).get("homepage")
+    if homepage and HOMEPAGE_RE.match(homepage):
+        try:
+            found += [(url, kind, LOGO_KIND_LABELS[kind]) for url, kind in homepage_logos(homepage)]
+        except (OSError, ValueError, http.client.HTTPException):
+            pass
+    _logo_choices_cache[stream_url] = (now, found)
+    for old in sorted(_logo_choices_cache, key=lambda k: _logo_choices_cache[k][0])[:-LOGO_CHOICES_SIZE]:
+        del _logo_choices_cache[old]
+    return found
+
+def logo_choices(stream_url):
+    # As opções da página, sem repetidas; "current" é a que está em uso
+    known = known_logo(stream_url)
+    saved = saved_logo(stream_url, known)
+    in_use = (saved or (known, None))[0]
+    options = [(known, "icon", "Na playlist")] if known else []
+    if saved:
+        options.append((saved[0], saved[1], "Escolhido automaticamente"))
+    choices = []
+    for url, kind, label in options + found_logos(stream_url):
+        if url not in (c["url"] for c in choices):
+            choices.append({"url": url, "kind": kind, "label": label, "current": url == in_use})
+    return choices
+
+@app.route("/logotipo")
+def logo_page():
+    url = request.args.get("url", "").strip()
+    if not safe_url(url) or not known_stream(url):
+        return error_page("Rádio desconhecida", "Só se pode mudar o logótipo das rádios das playlists ou da lista.", 404)
+    name = station_info().get(url, {}).get("name")
+    preview = read_preview()
+    if not name and preview and preview["url"] == url:
+        name = preview.get("name")
+    return render_page("logotipo.html", "", logo_edit={"url": url, "name": name or url, "key": logo_key(url),
+                                                       "choices": logo_choices(url)})
+
+def apply_logo(stream_url, logo):
+    # Escreve o logótipo (None tira-o) no #EXTINF de todas as playlists que têm a
+    # rádio e no ficheiro de nomes; a que se experimenta guarda-o na experiência
+    paths = [os.path.join(PLAYLIST_DIR, f) for f in sorted(os.listdir(PLAYLIST_DIR)) if f.endswith(".m3u")] \
+        if os.path.isdir(PLAYLIST_DIR) else []
+    with QUEUE_LOCK:
+        written = False
+        for path in paths + [NAMES_FILE]:
+            entries = read_m3u(path)
+            if any(u == stream_url and l != logo for u, _, l in entries):
+                write_m3u(path, [(u, n, logo if u == stream_url else l) for u, n, l in entries])
+            written |= any(u == stream_url for u, _, _ in entries)
+        preview = read_preview()
+        if preview and preview["url"] == stream_url:
+            set_preview({**preview, "logo": logo})
+        elif not written and logo:
+            # Na fila mas em nenhum ficheiro (lista por guardar): vai para o de nomes
+            with open(NAMES_FILE, "a", encoding="utf-8", newline="\n") as f:
+                f.write(extinf(None, logo) + stream_url + "\n")
+
+@app.route("/logotipo", methods=["POST"])
+def set_logo():
+    url = request.form.get("url", "").strip()
+    if not safe_url(url) or not known_stream(url):
+        return error_page("Rádio desconhecida", "Só se pode mudar o logótipo das rádios das playlists ou da lista.", 404)
+    page = "/logotipo?url=" + urllib.parse.quote(url, safe="")
+    path = os.path.join(LOGO_DIR, logo_key(url))
+    os.makedirs(LOGO_DIR, exist_ok=True)
+    # Uma descarga automática a meio não pode escrever por cima da escolha
+    with _logo_jobs_lock:
+        running = _logo_jobs.get(logo_key(url))
+    if running:
+        running.result()
+    if request.form.get("auto"):
+        apply_logo(url, None)
+        remember_logo_source(url, {"v": int(time.time() * 1000)})
+        for stale in (path, path + ".falhou"):
+            try:
+                os.remove(stale)
+            except FileNotFoundError:
+                pass
+        warm_logos([url])
+        return with_notice(redirect(page), "O logótipo volta a ser procurado automaticamente.")
+    logo = request.form.get("logo", "").strip()
+    kind = request.form.get("kind", "icon")
+    if not LOGO_URL_RE.match(logo):
+        return error_page("Endereço inválido", "O endereço da imagem tem de começar por http:// ou https:// "
+                          "e não pode ter espaços, aspas, vírgulas nem parênteses.", 400)
+    try:
+        data = fetch_public(logo, LOGO_MAX_BYTES)
+    except (OSError, ValueError, http.client.HTTPException):
+        data = b""
+    if len(data) > LOGO_MAX_BYTES or not image_type(data):
+        return error_page("Imagem inválida", "Não foi possível descarregar uma imagem desse endereço. "
+                          "Tem de ser PNG, JPEG, GIF, WebP, ICO ou SVG, até 512 KB.", 400)
+    data = shrink_logo(square_logo(data) if kind == "share" else data)
+    apply_logo(url, logo)
+    # O tipo fica no dicionário, para a imagem de partilha ser recortada outra vez se for preciso descarregá-la
+    remember_logo_source(url, {"logo": logo, "kind": "share" if kind == "share" else "icon", "from": logo,
+                               "t": time.time(), "v": int(time.time() * 1000)})
+    write_logo(path, data)
+    try:
+        os.remove(path + ".falhou")
+    except FileNotFoundError:
+        pass
+    return with_notice(redirect(page), "Logótipo mudado.")
 
 # Juntar uma rádio a partir da pesquisa ou de um tema volta à mesma página para
 # mostrar o ✓, o que repetia o pedido ao radio-browser (até 1000 rádios) por cada
@@ -1664,10 +2079,12 @@ def add_theme():
                     c.add(url)
                 c.command_list_end()
             write_m3u(path, entries + new)
+            warm_logos(u for u, _, _ in new)
             sync_active(c)
             return with_notice(redirect(view_url(target)), joined_text(len(new), target))
         os.makedirs(PLAYLIST_DIR, exist_ok=True)
         write_m3u(path, entries + new)
+        warm_logos(u for u, _, _ in new)
         if existed:
             return with_notice(redirect(view_url(target)), joined_text(len(new), target))
         # Playlist nova: passa a ser a que toca, como em "Nova playlist",
@@ -1925,6 +2342,7 @@ def listen():
             c.playid(song_id)
             drop_preview(c)
             set_preview({"url": url, "name": name or None, "logo": logo if LOGO_URL_RE.match(logo) else None})
+    warm_logos([url])
     return done()
 
 @app.route("/vote", methods=["POST"])
@@ -2011,6 +2429,7 @@ def add_stream():
                     os.remove(os.path.join(LOGO_DIR, logo_key(url) + ".falhou"))
                 except FileNotFoundError:
                     pass
+            warm_logos([url])
             label = f"«{name}»" if name else "A rádio"
             with mpd_client() as c:
                 if new_list is not None:
@@ -2469,4 +2888,7 @@ def update():
 if __name__ == "__main__":
     ensure_config_key()
     threading.Thread(target=watch_stream, daemon=True).start()
+    threading.Thread(target=logo_warmer, daemon=True).start()
+    # Os logótipos que ainda faltam nas playlists, para não ser a página a esperar por eles
+    warm_logos(station_info())
     app.run(host="0.0.0.0", port=8080)

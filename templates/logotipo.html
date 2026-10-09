@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+{% import "macros.html" as m with context %}
+{# Mudar o logótipo de uma estação à mão (aberta no reprodutor): as opções do
+   radio-browser e do site da rádio, um endereço colado, ou voltar ao automático.
+   A escolha fica no tvg-logo do #EXTINF, em todas as playlists que têm a rádio.
+   As miniaturas vêm direto dos sites, como os favicons dos resultados #}
+{% block content %}
+    {% set e = logo_edit %}
+    {{ m.back(list_href, "Lista") }}
+    <header class="page-head hero">
+        <img class="logo-edit-current" src="{{ logo_src(e.key, e.name) }}" alt="">
+        <div class="page-head-text">
+            <p class="eyebrow">Logótipo</p>
+            <h1>{{ e.name }}</h1>
+            <p class="muted">Escolhe uma das imagens encontradas ou cola o endereço de outra.</p>
+        </div>
+    </header>
+
+    {% if e.choices %}
+    <div class="logo-choices">
+        {% for c in e.choices %}
+        <form action="/logotipo" method="post">
+            <input type="hidden" name="url" value="{{ e.url }}">
+            <input type="hidden" name="logo" value="{{ c.url }}">
+            <input type="hidden" name="kind" value="{{ c.kind }}">
+            <button class="logo-choice{% if c.current %} on{% endif %}"{% if c.current %} aria-current="true"{% endif %} title="{{ c.url }}">
+                <img class="thumb" src="{{ c.url }}" alt="" loading="lazy" referrerpolicy="no-referrer"><span class="thumb empty" hidden>{{ icon("radio") }}</span>
+                <span class="logo-choice-label">{% if c.current %}{{ icon("check") }} {% endif %}{{ c.label }}</span>
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">Não se encontrou nenhuma imagem no radio-browser.info nem no site da rádio.</p>
+    {% endif %}
+
+    <form action="/logotipo" method="post" class="stack logo-manual">
+        <input type="hidden" name="url" value="{{ e.url }}">
+        <label class="field" for="logo-url">Endereço da imagem</label>
+        <div class="inline-form">
+            <input type="text" id="logo-url" name="logo" placeholder="https://.../logo.png" required autocomplete="off" spellcheck="false" inputmode="url">
+            <button class="btn primary small">Usar</button>
+        </div>
+        <p class="muted small">PNG, JPEG, GIF, WebP, ICO ou SVG, até 512 KB.</p>
+    </form>
+
+    <form action="/logotipo" method="post" class="logo-manual">
+        <input type="hidden" name="url" value="{{ e.url }}">
+        <button class="btn ghost small" name="auto" value="1">{{ icon("arrow-counter-clockwise") }}<span>Automático</span></button>
+        <p class="muted small">Tira o logótipo das playlists e volta a procurá-lo no radio-browser.info e no site da rádio.</p>
+    </form>
+{% endblock %}

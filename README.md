@@ -13,7 +13,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
 | `config.sh` | Abre as configurações do comando no browser do telemóvel |
-| `.env.example` | Modelo da configuração local (tópico do ntfy); a cópia `.env` não vai para o git |
+| `.env.example` | Modelo da configuração local (tópico do ntfy, webhook do Teams); a cópia `.env` não vai para o git |
 | `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
 ## Requisitos
@@ -73,6 +73,20 @@ Pode ser só o nome do tópico (usa o servidor público `ntfy.sh`) ou o endereç
 
 No `ntfy.sh` qualquer pessoa que saiba o nome do tópico recebe o link, e quem tem o link controla a rádio. Usa um nome difícil de adivinhar: sem `NTFY_TOKEN`, o `start.sh` recusa tópicos do `ntfy.sh` com menos de 16 caracteres e sugere um.
 
+### Receber o link no Microsoft Teams
+
+O `start.sh` também pode enviar o link para um chat ou canal do Teams, com ou sem ntfy. É preciso uma conta profissional ou escolar em que os Workflows (Power Automate) estejam permitidos.
+
+1. No Teams, abre os **Workflows** e escolhe o modelo **"Send webhook alerts to a chat"** (ou **"... to a channel"**).
+2. Escolhe um chat só teu ou um canal privado: quem lá estiver recebe o link, e quem tem o link controla a rádio.
+3. Copia o endereço `https://...` que o modelo dá e escreve-o no `.env` (ou em Configurações, com `~/config.sh`):
+
+```
+TEAMS_WEBHOOK_URL=https://...
+```
+
+Esse endereço é uma credencial (quem o tiver pode escrever no chat): não o partilhes. O link vai para cada destino configurado (ntfy e Teams); a página de partilha só abre quando não há nenhum, ou quando nenhum envio corre bem.
+
 ```bash
 ~/stop.sh
 ```
@@ -87,11 +101,11 @@ Se só quiseres controlar a rádio no próprio telemóvel ou na rede de casa, de
 TUNNEL_ENABLED=0
 ```
 
-Assim o `start.sh` não cria o link público, não envia nada para o ntfy e abre o comando no browser do telemóvel, em `http://localhost:8080`. Na rede local continua a funcionar em `http://<IP-do-telemóvel>:8080`. Sem esta linha (ou com `1`) o túnel fica ligado.
+Assim o `start.sh` não cria o link público, não envia nada para o ntfy nem para o Teams e abre o comando no browser do telemóvel, em `http://localhost:8080`. Na rede local continua a funcionar em `http://<IP-do-telemóvel>:8080`. Sem esta linha (ou com `1`) o túnel fica ligado.
 
 ### Configurações
 
-Para ligar ou desligar o túnel e mudar o tópico e o token do ntfy sem editar o `.env` à mão, corre no Termux:
+Para ligar ou desligar o túnel e mudar o tópico e o token do ntfy ou o webhook do Teams sem editar o `.env` à mão, corre no Termux:
 
 ```bash
 ~/config.sh

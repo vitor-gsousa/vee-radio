@@ -48,7 +48,7 @@ main() {
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
     chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh" "$INSTALL_DIR/update.sh"
-    # Configuração local (tópico do ntfy); nunca se substitui um .env que já exista
+    # Configuração local (tópico do ntfy, webhook do Teams); nunca se substitui um .env que já exista
     if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
         cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
     fi
@@ -83,7 +83,7 @@ BOOT
     echo "=== Instalação concluída! ==="
     echo "Para arrancar a jukebox: ~/start.sh"
     echo "Para arrancar sozinha quando o telemóvel liga, instala a app Termux:Boot (F-Droid) e abre-a uma vez."
-    echo "Para receber o link por notificação (ntfy), define o tópico em $INSTALL_DIR/.env"
+    echo "Para receber o link por notificação (ntfy ou Teams), define o tópico ou o webhook em $INSTALL_DIR/.env"
 }
 
 main "$@"

@@ -54,7 +54,7 @@ PLAYLIST_DIR = os.path.expanduser("~/.config/mpd/playlists")
 NAMES_FILE = os.path.expanduser("~/.config/mpd/nomes.m3u")
 # Playlist que está carregada na fila; o start.sh volta a carregá-la se a fila estiver vazia
 ACTIVE_FILE = os.path.expanduser("~/.config/mpd/playlist-ativa.txt")
-# Configuração local (túnel e ntfy), lida pelo start.sh. Muda-se na janela
+# Configuração local (túnel, ntfy e Teams), lida pelo start.sh. Muda-se na janela
 # Configurações, que só aparece no próprio telemóvel (is_local)
 ENV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 ENV_EXAMPLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env.example")
@@ -68,7 +68,7 @@ RESTART_LOG = os.path.expanduser("~/restart.log")
 CONFIG_KEY_FILE = os.path.expanduser("~/.config/vee-radio/chave")
 CONFIG_COOKIE = "vee_config"
 # Escrito pelo start.sh com o link do Cloudflare Tunnel. Não aparece na página (é a
-# chave de acesso e chega por ntfy ou pela página local); só serve para validar o Origin
+# chave de acesso e chega por ntfy, Teams ou pela página local); só serve para validar o Origin
 TUNNEL_URL_FILE = os.path.expanduser("~/tunnel-url.txt")
 # Logótipos descarregados, um ficheiro por stream
 LOGO_DIR = os.path.expanduser("~/.cache/vee-radio/logos")
@@ -2723,6 +2723,11 @@ ENV_LINE_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
 NTFY_TOPIC_RE = re.compile(r"^(https?://[^\s\"'<>]+|[A-Za-z0-9_-]{1,64})$")
 NTFY_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,256}$")
 NTFY_MIN_TOPIC = 16
+# Webhook dos Workflows do Teams (Power Automate). Sem aspas, \ nem espaços, porque o
+# start.sh o passa ao curl entre aspas, e só nos domínios da Microsoft: o endereço
+# recebe o link, e um erro de cópia mandava-o para outro sítio
+TEAMS_WEBHOOK_RE = re.compile(r"^https://[A-Za-z0-9.-]+(:443)?/[A-Za-z0-9/._~%&=?+-]{1,2000}$")
+TEAMS_HOSTS = ("logic.azure.com", "powerplatform.com", "powerautomate.com", "flow.microsoft.com")
 TUNNEL_OFF = ("0", "false", "off", "no", "nao", "não")
 
 def read_env():
@@ -2766,7 +2771,7 @@ def write_env(updates):
         out.append(line.replace("\r", ""))
     out += [f"{k}={v}" for k, v in updates.items() if k not in done]
     tmp = ENV_FILE + ".tmp"
-    # O .env tem o token do ntfy: só o Termux o pode ler
+    # O .env tem o token do ntfy e o webhook do Teams: só o Termux o pode ler
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with open(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(out) + "\n")
@@ -2784,10 +2789,17 @@ def weak_ntfy_topic(topic, token):
             return False
     return len(topic.rstrip("/").rsplit("/", 1)[-1]) < NTFY_MIN_TOPIC
 
+def valid_teams_webhook(url):
+    if not TEAMS_WEBHOOK_RE.match(url):
+        return False
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in TEAMS_HOSTS)
+
 def config_context():
     values = read_env()
     return {"tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
-            "has_token": bool(values.get("NTFY_TOKEN")), "suggestion": "radio-" + secrets.token_hex(8),
+            "has_token": bool(values.get("NTFY_TOKEN")), "has_teams": bool(values.get("TEAMS_WEBHOOK_URL")),
+            "suggestion": "radio-" + secrets.token_hex(8),
             "saved": request.args.get("config") == "guardada", "version": app_version(),
             "up_to_date": request.args.get("atualizacao") == "nada"}
 
@@ -2835,8 +2847,11 @@ def config():
         return error_page("Sem acesso", "As configurações só se mudam no próprio telemóvel: abre-as no Termux com ~/config.sh.", 403)
     topic = request.form.get("ntfy_topic", "").strip()
     new_token = request.form.get("ntfy_token", "").strip()
-    old_token = read_env().get("NTFY_TOKEN", "")
-    token = "" if request.form.get("clear_token") else new_token or old_token
+    env = read_env()
+    token = "" if request.form.get("clear_token") else new_token or env.get("NTFY_TOKEN", "")
+    # Como o token, o webhook do Teams nunca aparece na página: vazio mantém o atual
+    new_teams = request.form.get("teams_webhook", "").strip()
+    teams = "" if request.form.get("clear_teams") else new_teams or env.get("TEAMS_WEBHOOK_URL", "")
     if topic and not NTFY_TOPIC_RE.match(topic):
         return error_page("Tópico inválido", "O tópico do ntfy é um nome só com letras, números, - e _ (até 64), "
                           "ou o endereço completo de um servidor (https://...).", 400)
@@ -2845,13 +2860,17 @@ def config():
     if weak_ntfy_topic(topic, token):
         return error_page("Tópico fácil de adivinhar", f"No ntfy.sh, sem token, o tópico tem de ter pelo menos "
                           f"{NTFY_MIN_TOPIC} caracteres: quem o souber recebe o link e controla a rádio.", 400)
+    if new_teams and not valid_teams_webhook(new_teams):
+        return error_page("Webhook inválido", "O webhook do Teams é o endereço https://... que os Workflows dão "
+                          "(modelo \"Send webhook alerts to a chat\"), tal como foi copiado.", 400)
     write_env({"TUNNEL_ENABLED": "1" if request.form.get("tunnel") else "0",
-               "NTFY_TOPIC_URL": topic, "NTFY_TOKEN": token})
+               "NTFY_TOPIC_URL": topic, "NTFY_TOKEN": token, "TEAMS_WEBHOOK_URL": teams})
     if not request.form.get("aplicar"):
         return redirect("/?config=guardada#config")
     restart_all()
     if request.form.get("tunnel"):
-        link = ("O link público muda: o novo chega pelo ntfy." if topic
+        where = " e pelo ".join(n for n, on in (("ntfy", topic), ("Teams", teams)) if on)
+        link = (f"O link público muda: o novo chega pelo {where}." if where
                 else "O link público muda: abre-se a página para o partilhar.")
     else:
         link = "Sem túnel, o comando fica só neste telemóvel e na rede local."

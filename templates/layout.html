@@ -49,7 +49,7 @@
     </div>
 
     {# Só no próprio telemóvel (localhost): quem tem o link do túnel não pode trocar o
-       tópico do ntfy pelo seu e ficar a receber os links seguintes #}
+       tópico do ntfy (ou o webhook do Teams) pelo seu e ficar a receber os links seguintes #}
     {% if config %}
     <div class="modal" id="config">
         <a class="backdrop" href="#fechar" aria-label="Fechar"></a>
@@ -67,6 +67,10 @@
                 <label class="field" for="ntfy-token">Token do ntfy</label>
                 <input type="password" id="ntfy-token" name="ntfy_token" placeholder="{% if config.has_token %}Definido. Vazio mantém o atual{% else %}Opcional (tk_...){% endif %}" autocomplete="new-password">
                 {% if config.has_token %}<label class="check"><input type="checkbox" name="clear_token" value="1"> Remover o token</label>{% endif %}
+                <label class="field" for="teams-webhook">Webhook do Teams</label>
+                <input type="password" id="teams-webhook" name="teams_webhook" placeholder="{% if config.has_teams %}Definido. Vazio mantém o atual{% else %}Opcional (https://...){% endif %}" autocomplete="off" spellcheck="false">
+                <p class="muted small">Para receber o link também no Teams (com ou sem ntfy). Nos Workflows do Teams, usa o modelo "Send webhook alerts to a chat" num chat só teu e cola aqui o endereço: quem estiver no chat ou canal recebe o link e controla a rádio.</p>
+                {% if config.has_teams %}<label class="check"><input type="checkbox" name="clear_teams" value="1"> Remover o webhook</label>{% endif %}
                 <button class="btn primary" name="aplicar" value="1">Guardar e aplicar agora</button>
                 <button class="btn">Guardar</button>
             </form>

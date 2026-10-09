@@ -28,7 +28,6 @@ ntfy_curl() {
     fi
 }
 
-# Envia o link para o tópico do ntfy; falha se não houver tópico ou se o envio não correr bem
 # Túnel ligado, a não ser que o .env diga o contrário (TUNNEL_ENABLED=0); sem a
 # chave fica ligado, como antes de haver a opção
 tunnel_enabled() {
@@ -38,6 +37,7 @@ tunnel_enabled() {
     return 0
 }
 
+# Envia o link para o tópico do ntfy; falha se não houver tópico ou se o envio não correr bem
 send_ntfy() {
     local topic token
     topic="$(env_value NTFY_TOPIC_URL)"
@@ -70,6 +70,32 @@ send_ntfy() {
         -H "Actions: view, Abrir comando, $1" \
         --data-binary @- \
         "$topic"
+}
+
+# Envia o link para o Teams por um webhook dos Workflows (Power Automate); falha
+# se não houver webhook ou se o envio não correr bem. O endereço do webhook é uma
+# credencial (tem a assinatura sig=...): vai ao curl por um descritor, e não na
+# linha de comando, onde ficaria visível na lista de processos
+send_teams() {
+    local webhook
+    webhook="$(env_value TEAMS_WEBHOOK_URL)"
+    [ -n "$webhook" ] || return 1
+    # Vai entre aspas no ficheiro de configuração do curl: aspas, barras invertidas
+    # ou espaços estragavam-no
+    case "$webhook" in
+        https://*) ;;
+        *) echo "O webhook do Teams tem de começar por https://."; return 1 ;;
+    esac
+    case "$webhook" in
+        *[\"\\[:space:]]*) echo "O webhook do Teams tem caracteres inválidos (aspas, \\ ou espaços)."; return 1 ;;
+    esac
+    # O modelo dos Workflows só aceita um Adaptive Card dentro de attachments. O link
+    # do túnel só tem letras, números, - e . (vem do grep), por isso vai tal e qual no JSON.
+    # Em UTF-8 pelo stdin, por causa do "á"
+    printf '{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.4","body":[{"type":"TextBlock","text":"VEE Rádio","weight":"Bolder","size":"Medium"},{"type":"TextBlock","text":"Link do comando: %s","wrap":true}],"actions":[{"type":"Action.OpenUrl","title":"Abrir comando","url":"%s"}]}}]}' "$1" "$1" |
+        curl -K <(printf 'url = "%s"\n' "$webhook") -fsS --max-time 15 -o /dev/null \
+            -H "Content-Type: application/json; charset=utf-8" \
+            --data-binary @-
 }
 
 # Pede ao processo que termine e espera até 10 s que saia: o pkill não espera, e
@@ -160,13 +186,31 @@ if [ -z "$URL" ]; then
 fi
 echo "$URL" > ~/tunnel-url.txt
 
-# Com um tópico do ntfy no .env, o link chega por notificação; sem ele (ou se o
-# envio falhar), abre-se uma página só no próprio telemóvel (127.0.0.1) para
-# copiar ou partilhar o link à mão
-if [ -n "$(env_value NTFY_TOPIC_URL)" ] && send_ntfy "$URL"; then
-    echo "Link enviado para o tópico do ntfy."
-else
-    [ -n "$(env_value NTFY_TOPIC_URL)" ] && echo "Não foi possível enviar o link para o ntfy; a abrir a página de partilha."
+# O link vai para cada destino que estiver no .env (tópico do ntfy, webhook do
+# Teams). Se não houver nenhum, ou se nenhum envio correr bem, abre-se uma página
+# só no próprio telemóvel (127.0.0.1) para copiar ou partilhar o link à mão
+SENT=0
+TRIED=0
+if [ -n "$(env_value NTFY_TOPIC_URL)" ]; then
+    TRIED=1
+    if send_ntfy "$URL"; then
+        echo "Link enviado para o tópico do ntfy."
+        SENT=1
+    else
+        echo "Não foi possível enviar o link para o ntfy."
+    fi
+fi
+if [ -n "$(env_value TEAMS_WEBHOOK_URL)" ]; then
+    TRIED=1
+    if send_teams "$URL"; then
+        echo "Link enviado para o Teams."
+        SENT=1
+    else
+        echo "Não foi possível enviar o link para o Teams."
+    fi
+fi
+if [ "$SENT" = 0 ]; then
+    [ "$TRIED" = 1 ] && echo "A abrir a página de partilha."
     mkdir -p "$LINK_DIR"
     sed "s|__URL__|$URL|g" "$DIR/link.html" > "$LINK_DIR/index.html"
     nohup python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &

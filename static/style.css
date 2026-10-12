@@ -485,10 +485,12 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
    painéis, e o :checked mostra o painel e marca o separador */
 .tab-radio { position: absolute; opacity: 0; pointer-events: none; }
 .config-tabs { margin: 0; }
+/* Só ícones: os três repartem a largura, para serem fáceis de acertar com o dedo */
 .config-tabs label {
-    display: inline-flex; align-items: center; padding: 9px 16px; border-radius: 999px; flex: none; cursor: pointer;
-    background: var(--surface-2); color: var(--text); font-size: 14px; font-weight: 700;
+    flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 999px;
+    cursor: pointer; background: var(--surface-2); color: var(--text);
 }
+.config-tabs label .i { width: 22px; height: 22px; }
 .config-tabs label:hover { background: var(--surface-3); }
 .tab-panel { display: none; flex-direction: column; gap: 12px; }
 #sep-geral:checked ~ .panel-geral, #sep-acesso:checked ~ .panel-acesso,

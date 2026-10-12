@@ -59,13 +59,18 @@
         <div class="modal-box config-box">
             <a class="icon-btn close" href="#fechar" aria-label="Fechar">{{ icon("x") }}</a>
             <h2>Configurações</h2>
-            {% for id, label in [("geral", "Geral"), ("acesso", "Acesso"), ("atualizacoes", "Atualizações")] %}
-            <input type="radio" class="tab-radio" name="separador-config" id="sep-{{ id }}"{% if config.tab == id %} checked{% endif %}>
+            {# Só ícones, porque o modal só abre no telemóvel; o nome fica no title (toque
+               longo) e no aria-label, para os leitores de ecrã #}
+            {% set config_tabs = [("geral", "Geral: nome e título", "sliders-horizontal"),
+                                  ("acesso", "Acesso: túnel e notificações", "globe"),
+                                  ("atualizacoes", "Atualizações", "arrows-clockwise")] %}
+            {% for id, label, ic in config_tabs %}
+            <input type="radio" class="tab-radio" name="separador-config" id="sep-{{ id }}" aria-label="{{ label }}"{% if config.tab == id %} checked{% endif %}>
             {% endfor %}
             <div class="tabs config-tabs">
-                <label for="sep-geral">Geral</label>
-                <label for="sep-acesso">Acesso</label>
-                <label for="sep-atualizacoes">Atualizações</label>
+                {% for id, label, ic in config_tabs %}
+                <label for="sep-{{ id }}" title="{{ label }}">{{ icon(ic) }}</label>
+                {% endfor %}
             </div>
 
             <section class="tab-panel panel-geral">
@@ -109,7 +114,7 @@
                 {% if config.up_to_date %}<p class="notice ok">{{ icon("check-circle") }} Já tens a versão mais recente.</p>{% endif %}
                 <form action="/atualizar" method="post" class="stack">
                     <p class="muted small">{% if config.version %}Versão {{ config.version }}. {% endif %}Vai buscar a versão mais recente ao GitHub e, se houver novidades, reinicia a rádio (a música para uns segundos). Também se atualiza sozinha quando o telemóvel arranca.</p>
-                    <button class="btn">{{ icon("arrow-counter-clockwise") }} Procurar atualizações</button>
+                    <button class="btn">{{ icon("arrows-clockwise") }} Procurar atualizações</button>
                 </form>
             </section>
             <p class="muted small">Só aparecem aqui, no próprio telemóvel.</p>

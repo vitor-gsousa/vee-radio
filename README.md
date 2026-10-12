@@ -105,13 +105,13 @@ Assim o `start.sh` não cria o link público, não envia nada para o ntfy nem pa
 
 ### Configurações
 
-Para ligar ou desligar o túnel e mudar o tópico e o token do ntfy ou o webhook do Teams sem editar o `.env` à mão, corre no Termux:
+Para mudar o nome da app, ligar ou desligar o túnel e mudar o tópico e o token do ntfy ou o webhook do Teams sem editar o `.env` à mão, corre no Termux:
 
 ```bash
 ~/config.sh
 ```
 
-Abre o comando no browser do telemóvel com a janela **Configurações**, e a partir daí o botão **⚙** fica na barra de cima desse browser. Sem túnel, o `start.sh` já abre o comando assim. **Guardar** aplica-se no próximo arranque; **Guardar e aplicar agora** reinicia já a rádio (a música para uns segundos e, com o túnel, o link muda).
+Abre a página **Configurações** no browser do telemóvel, e a partir daí o botão **⚙** fica no topo do Início desse browser. A página tem três separadores: **Geral** (nome da app e título do site, aplicados logo), **Acesso** (túnel, ntfy e Teams) e **Atualizações**. Sem túnel, o `start.sh` já abre o comando assim. **Guardar** aplica-se no próximo arranque; **Guardar e aplicar agora** reinicia já a rádio (a música para uns segundos e, com o túnel, o link muda).
 
 As configurações não aparecem pelo link do túnel nem na rede local, e precisam de uma chave que só o Termux lê (`~/.config/vee-radio/chave`). Quem tivesse o link, ou outra app do telemóvel, podia trocar o tópico pelo seu e passar a receber os links seguintes.
 

@@ -10,7 +10,7 @@
             <h1>Início</h1>
         </div>
         <div class="page-head-actions">
-            {% if config %}<a class="icon-btn" href="#config" title="Configurações" aria-label="Configurações">{{ icon("gear-six") }}</a>{% endif %}
+            {% if can_config %}<a class="icon-btn" href="/configuracoes" title="Configurações" aria-label="Configurações">{{ icon("gear-six") }}</a>{% endif %}
         </div>
     </header>
 

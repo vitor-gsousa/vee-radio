@@ -1,0 +1,69 @@
+{% extends "layout.html" %}
+{% import "macros.html" as m with context %}
+{# Configurações: só no próprio telemóvel (localhost e a chave), porque quem tem o link
+   do túnel podia trocar o tópico do ntfy (ou o webhook do Teams) pelo seu e ficar a
+   receber os links seguintes. Três separadores, cada um com o seu endereço; só
+   ícones, com o nome no title e no aria-label, e o título no topo do painel #}
+{% block content %}
+    {{ m.back("/", "Início") }}
+    <header class="page-head">
+        <div class="page-head-text">
+            <h1>Configurações</h1>
+        </div>
+    </header>
+    {% set config_tabs = [("geral", "/configuracoes", "Geral: nome e título", "sliders-horizontal"),
+                          ("acesso", "/configuracoes/acesso", "Acesso: túnel e notificações", "globe"),
+                          ("atualizacoes", "/configuracoes/atualizacoes", "Atualizações", "arrows-clockwise")] %}
+    <nav class="tabs config-tabs" aria-label="Separadores das configurações">
+        {% for id, href, label, ic in config_tabs %}
+        <a href="{{ href }}" title="{{ label }}" aria-label="{{ label }}"{% if id == config.tab %} class="on" aria-current="page"{% endif %}>{{ icon(ic) }}</a>
+        {% endfor %}
+    </nav>
+
+    <section class="settings">
+    {% if config.tab == "geral" %}
+        <h3 class="panel-title">Nome e título</h3>
+        {% if config.saved %}<p class="notice ok">{{ icon("check-circle") }} Guardado.</p>{% endif %}
+        <form action="/config" method="post" class="stack">
+            <input type="hidden" name="secao" value="geral">
+            <label class="field" for="app-name">Nome da app</label>
+            <input type="text" id="app-name" name="app_name" value="{{ config.app_name }}" placeholder="{{ config.name_default }}" maxlength="{{ config.max_name }}" autocomplete="off">
+            <p class="muted small">Aparece no menu, nas mensagens do ntfy e do Teams e na página do link. Vazio: {{ config.name_default }}.</p>
+            <label class="field" for="app-title">Título do site</label>
+            <input type="text" id="app-title" name="app_title" value="{{ config.app_title }}" placeholder="{{ config.app_name or config.name_default }}" maxlength="{{ config.max_name }}" autocomplete="off">
+            <p class="muted small">O nome do separador do browser quando nada está a tocar. Vazio: o nome da app.</p>
+            <button class="btn primary">Guardar</button>
+        </form>
+        <p class="muted small">Aplica-se logo, sem reiniciar.</p>
+    {% elif config.tab == "acesso" %}
+        <h3 class="panel-title">Acesso e notificações</h3>
+        <p class="muted small">"Guardar" aplica-se no próximo arranque; "Guardar e aplicar" reinicia já a rádio (a música para uns segundos).</p>
+        {% if config.saved %}<p class="notice ok">{{ icon("check-circle") }} Guardado. Aplica-se no próximo arranque.</p>{% endif %}
+        <form action="/config" method="post" class="stack">
+            <input type="hidden" name="secao" value="acesso">
+            <label class="check"><input type="checkbox" name="tunnel" value="1"{% if config.tunnel %} checked{% endif %}> Acesso pela internet (Cloudflare Tunnel)</label>
+            <p class="muted small">Ligado: cria um link público para controlar a rádio de qualquer lado. Desligado: só neste telemóvel (abre http://localhost:8080) e na rede local, em http://&lt;IP-do-telemóvel&gt;:8080.</p>
+            <label class="field" for="ntfy-topic">Tópico do ntfy</label>
+            <input type="text" id="ntfy-topic" name="ntfy_topic" value="{{ config.topic }}" placeholder="ex: {{ config.suggestion }}" autocomplete="off" spellcheck="false">
+            <p class="muted small">Para receber o link por notificação. Um nome difícil de adivinhar (no ntfy.sh, sem token, pelo menos 16 caracteres; por exemplo {{ config.suggestion }}) ou o endereço de outro servidor. Vazio: abre a página para partilhar o link.</p>
+            <label class="field" for="ntfy-token">Token do ntfy</label>
+            <input type="password" id="ntfy-token" name="ntfy_token" placeholder="{% if config.has_token %}Definido. Vazio mantém o atual{% else %}Opcional (tk_...){% endif %}" autocomplete="new-password">
+            {% if config.has_token %}<label class="check"><input type="checkbox" name="clear_token" value="1"> Remover o token</label>{% endif %}
+            <label class="field" for="teams-webhook">Webhook do Teams</label>
+            <input type="password" id="teams-webhook" name="teams_webhook" placeholder="{% if config.has_teams %}Definido. Vazio mantém o atual{% else %}Opcional (https://...){% endif %}" autocomplete="off" spellcheck="false">
+            <p class="muted small">Para receber o link também no Teams (com ou sem ntfy). Nos Workflows do Teams, usa o modelo "Send webhook alerts to a chat" num chat só teu e cola aqui o endereço: quem estiver no chat ou canal recebe o link e controla a rádio.</p>
+            {% if config.has_teams %}<label class="check"><input type="checkbox" name="clear_teams" value="1"> Remover o webhook</label>{% endif %}
+            <button class="btn primary" name="aplicar" value="1">Guardar e aplicar agora</button>
+            <button class="btn">Guardar</button>
+        </form>
+    {% else %}
+        <h3 class="panel-title">Atualizações</h3>
+        {% if config.up_to_date %}<p class="notice ok">{{ icon("check-circle") }} Já tens a versão mais recente.</p>{% endif %}
+        <form action="/atualizar" method="post" class="stack">
+            <p class="muted small">{% if config.version %}Versão {{ config.version }}. {% endif %}Vai buscar a versão mais recente ao GitHub e, se houver novidades, reinicia a rádio (a música para uns segundos). Também se atualiza sozinha quando o telemóvel arranca.</p>
+            <button class="btn">{{ icon("arrows-clockwise") }} Procurar atualizações</button>
+        </form>
+    {% endif %}
+        <p class="muted small">As configurações só aparecem aqui, no próprio telemóvel.</p>
+    </section>
+{% endblock %}

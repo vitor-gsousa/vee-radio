@@ -1047,7 +1047,7 @@ def station_cards(items, current_id):
 def render_page(template, page, results=None, query="", filters=None, theme=None, view=None, tab=None,
                 dashboard=None, pages=None, **extra):
     # Todas as páginas têm a navegação, o reprodutor e as janelas pequenas (nova
-    # playlist, configurações); page diz qual dos separadores está aceso
+    # playlist); page diz qual dos separadores está aceso
     with mpd_client() as c:
         status = c.status()
         current = watched_song(c, c.currentsong())
@@ -1103,7 +1103,7 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
                                   removed=removed_context(),
-                                  config=config_context() if can_configure() else None, **extra)
+                                  can_config=can_configure(), **extra)
 
 def tunnel_host():
     try:
@@ -2801,7 +2801,6 @@ def valid_teams_webhook(url):
 APP_NAME_DEFAULT = "VEE Rádio"
 MAX_APP_NAME = 40
 APP_NAME_RE = re.compile(r"^[^\x00-\x1f\x7f\"`$\\|&<>]+$")
-CONFIG_TABS = ("geral", "acesso", "atualizacoes")
 _brand = (None, None)
 
 @app.template_global()
@@ -2815,17 +2814,15 @@ def brand():
         _brand = (sig, {"name": name, "title": values.get("APP_TITLE", "").strip() or name})
     return _brand[1]
 
-def config_context():
+def config_context(tab):
     values = read_env()
-    tab = request.args.get("separador", "")
-    return {"tab": tab if tab in CONFIG_TABS else "acesso" if request.args.get("config") else
-            "atualizacoes" if request.args.get("atualizacao") else "geral",
+    return {"tab": tab,
             "app_name": values.get("APP_NAME", ""), "app_title": values.get("APP_TITLE", ""),
             "name_default": APP_NAME_DEFAULT, "max_name": MAX_APP_NAME,
             "tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
             "has_token": bool(values.get("NTFY_TOKEN")), "has_teams": bool(values.get("TEAMS_WEBHOOK_URL")),
             "suggestion": "radio-" + secrets.token_hex(8),
-            "saved": request.args.get("config") == "guardada", "version": app_version(),
+            "saved": request.args.get("guardado") == "1", "version": app_version(),
             "up_to_date": request.args.get("atualizacao") == "nada"}
 
 _version = None
@@ -2848,7 +2845,7 @@ def enter():
     # (~/config.sh ou o start.sh sem túnel), que é o único que lê a chave
     if not (is_local() and same_key(request.args.get("chave", ""), config_key())):
         return error_page("Chave inválida", "Abre as configurações a partir do Termux, com ~/config.sh.", 403)
-    response = redirect("/#config" if request.args.get("ir") == "config" else "/")
+    response = redirect("/configuracoes" if request.args.get("ir") == "config" else "/")
     # Lax e não Strict: o link chega de outra app (termux-open-url), e o browser trata
     # essa navegação como vinda de outro site; com Strict o cookie não ia no
     # redirecionamento a seguir e a página abria sem as Configurações. Os POST de
@@ -2866,10 +2863,21 @@ def restart_all(script=START_SCRIPT):
                      env={**os.environ, "VEE_RADIO_NO_OPEN": "1"})
     log.close()
 
+# Configurações: uma página com três separadores (Geral, Acesso, Atualizações), cada
+# um com o seu endereço, para o "voltar" do Android e os redirects depois de guardar
+NO_CONFIG_ACCESS = ("Sem acesso", "As configurações só se mudam no próprio telemóvel: abre-as no Termux com ~/config.sh.", 403)
+
+@app.route("/configuracoes", defaults={"tab": "geral"})
+@app.route("/configuracoes/<any(acesso, atualizacoes):tab>")
+def settings_page(tab):
+    if not can_configure():
+        return error_page(*NO_CONFIG_ACCESS)
+    return render_page("configuracoes.html", "inicio", config=config_context(tab))
+
 @app.route("/config", methods=["POST"])
 def config():
     if not can_configure():
-        return error_page("Sem acesso", "As configurações só se mudam no próprio telemóvel: abre-as no Termux com ~/config.sh.", 403)
+        return error_page(*NO_CONFIG_ACCESS)
     if request.form.get("secao") == "geral":
         return config_general()
     topic = request.form.get("ntfy_topic", "").strip()
@@ -2893,7 +2901,7 @@ def config():
     write_env({"TUNNEL_ENABLED": "1" if request.form.get("tunnel") else "0",
                "NTFY_TOPIC_URL": topic, "NTFY_TOKEN": token, "TEAMS_WEBHOOK_URL": teams})
     if not request.form.get("aplicar"):
-        return redirect("/?config=guardada#config")
+        return redirect("/configuracoes/acesso?guardado=1")
     restart_all()
     if request.form.get("tunnel"):
         where = " e pelo ".join(n for n, on in (("ntfy", topic), ("Teams", teams)) if on)
@@ -2917,7 +2925,7 @@ def config_general():
                               "sem aspas duplas nem os símbolos ` $ \\ | & < >.", 400)
         names[key] = f'"{value}"' if value else ""
     write_env(names)
-    return redirect("/?config=guardada&separador=geral#config")
+    return redirect("/configuracoes?guardado=1")
 
 @app.route("/atualizar", methods=["POST"])
 def update():
@@ -2930,7 +2938,7 @@ def update():
     except subprocess.TimeoutExpired:
         return error_page("Sem resposta", "O GitHub não respondeu a tempo. Tenta outra vez daqui a pouco.", 504)
     if check.returncode == 3:
-        return redirect("/?atualizacao=nada#config")
+        return redirect("/configuracoes/atualizacoes?atualizacao=nada")
     if check.returncode != 0:
         reason = check.stdout.strip().splitlines()[-1:] or ["O update.sh falhou; vê o ~/restart.log."]
         return error_page("Não foi possível atualizar", reason[0], 502)

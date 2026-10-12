@@ -481,30 +481,12 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .modal-box > form > .btn, .modal-box > .btn { width: 100%; }
 .close { position: absolute; top: 12px; right: 12px; }
 
-/* Configurações em separadores: rádios escondidos antes dos separadores e dos
-   painéis, e o :checked mostra o painel e marca o separador */
-.tab-radio { position: absolute; opacity: 0; pointer-events: none; }
-/* flex: none e overflow visível: o .modal-box é uma coluna flex com altura máxima, e
-   com o overflow-x do .tabs a barra encolhia até desaparecer quando o painel não cabia
-   (o Acesso, ou qualquer um com o teclado aberto) */
-.config-tabs { margin: 0; flex: none; overflow: visible; }
-/* Só ícones: os três repartem a largura, para serem fáceis de acertar com o dedo */
-.config-tabs label {
-    flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 999px;
-    cursor: pointer; background: var(--surface-2); color: var(--text);
-}
-.config-tabs label .i { width: 22px; height: 22px; }
-/* O nome do separador escolhido, no topo do painel */
+/* Configurações (página): separadores só com ícones, que repartem a largura para
+   serem fáceis de acertar com o dedo, e o título do separador no topo do painel */
+.config-tabs a { flex: 1; justify-content: center; min-height: 44px; padding: 0 12px; }
+.config-tabs a .i { width: 22px; height: 22px; }
+.settings { display: flex; flex-direction: column; gap: 12px; max-width: 560px; }
 .panel-title { margin: 4px 2px 0; font-size: 16px; font-weight: 800; }
-.config-tabs label:hover { background: var(--surface-3); }
-.tab-panel { display: none; flex-direction: column; gap: 12px; }
-#sep-geral:checked ~ .panel-geral, #sep-acesso:checked ~ .panel-acesso,
-#sep-atualizacoes:checked ~ .panel-atualizacoes { display: flex; }
-#sep-geral:checked ~ .config-tabs label[for="sep-geral"], #sep-acesso:checked ~ .config-tabs label[for="sep-acesso"],
-#sep-atualizacoes:checked ~ .config-tabs label[for="sep-atualizacoes"] { background: var(--text); color: #000; }
-#sep-geral:focus-visible ~ .config-tabs label[for="sep-geral"], #sep-acesso:focus-visible ~ .config-tabs label[for="sep-acesso"],
-#sep-atualizacoes:focus-visible ~ .config-tabs label[for="sep-atualizacoes"] { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
-.tab-panel > form > .btn { width: 100%; }
 
 /* Reprodutor aberto (#tocar): no telemóvel sobe do fundo, como no Spotify */
 .sheet { padding: 0; align-items: flex-end; }

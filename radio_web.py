@@ -2795,9 +2795,34 @@ def valid_teams_webhook(url):
     host = (urllib.parse.urlsplit(url).hostname or "").lower()
     return any(host == h or host.endswith("." + h) for h in TEAMS_HOSTS)
 
+# Nome da app (marca na barra lateral, mensagens do ntfy e do Teams, página do link) e título do
+# separador do browser. Ficam no .env entre aspas; o start.sh mete o nome num sed e
+# no HTML do link.html, por isso não se aceitam aspas duplas, `, $, \, |, &, < nem >
+APP_NAME_DEFAULT = "VEE Rádio"
+MAX_APP_NAME = 40
+APP_NAME_RE = re.compile(r"^[^\x00-\x1f\x7f\"`$\\|&<>]+$")
+CONFIG_TABS = ("geral", "acesso", "atualizacoes")
+_brand = (None, None)
+
+@app.template_global()
+def brand():
+    # Lido em cada página e em cada /estado: só se volta a ler o .env quando muda
+    global _brand
+    sig = file_sig(ENV_FILE)
+    if _brand[0] != sig:
+        values = read_env()
+        name = values.get("APP_NAME", "").strip() or APP_NAME_DEFAULT
+        _brand = (sig, {"name": name, "title": values.get("APP_TITLE", "").strip() or name})
+    return _brand[1]
+
 def config_context():
     values = read_env()
-    return {"tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
+    tab = request.args.get("separador", "")
+    return {"tab": tab if tab in CONFIG_TABS else "acesso" if request.args.get("config") else
+            "atualizacoes" if request.args.get("atualizacao") else "geral",
+            "app_name": values.get("APP_NAME", ""), "app_title": values.get("APP_TITLE", ""),
+            "name_default": APP_NAME_DEFAULT, "max_name": MAX_APP_NAME,
+            "tunnel": tunnel_enabled(values), "topic": values.get("NTFY_TOPIC_URL", ""),
             "has_token": bool(values.get("NTFY_TOKEN")), "has_teams": bool(values.get("TEAMS_WEBHOOK_URL")),
             "suggestion": "radio-" + secrets.token_hex(8),
             "saved": request.args.get("config") == "guardada", "version": app_version(),
@@ -2845,6 +2870,8 @@ def restart_all(script=START_SCRIPT):
 def config():
     if not can_configure():
         return error_page("Sem acesso", "As configurações só se mudam no próprio telemóvel: abre-as no Termux com ~/config.sh.", 403)
+    if request.form.get("secao") == "geral":
+        return config_general()
     topic = request.form.get("ntfy_topic", "").strip()
     new_token = request.form.get("ntfy_token", "").strip()
     env = read_env()
@@ -2879,6 +2906,18 @@ def config():
     # Sem JavaScript o browser volta à página sozinho; com ele, o app.js faz o mesmo
     response.headers["Refresh"] = "12; url=/"
     return response
+
+def config_general():
+    # O nome e o título aplicam-se logo (o brand() relê o .env); não é preciso reiniciar
+    names = {}
+    for key, field in (("APP_NAME", "app_name"), ("APP_TITLE", "app_title")):
+        value = " ".join(request.form.get(field, "").split())
+        if len(value) > MAX_APP_NAME or (value and not APP_NAME_RE.match(value)):
+            return error_page("Nome inválido", f"O nome e o título têm até {MAX_APP_NAME} caracteres, "
+                              "sem aspas duplas nem os símbolos ` $ \\ | & < >.", 400)
+        names[key] = f'"{value}"' if value else ""
+    write_env(names)
+    return redirect("/?config=guardada&separador=geral#config")
 
 @app.route("/atualizar", methods=["POST"])
 def update():

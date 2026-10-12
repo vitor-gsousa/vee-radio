@@ -15,6 +15,14 @@ env_value() {
         sed "s/[[:space:]]*\$//; s/^[\"']//; s/[\"']\$//"
 }
 
+# Nome da app, mudado em Configurações (Geral). O radio_web.py só o aceita sem
+# aspas duplas, `, $, \, |, & nem < >, por isso pode ir para o sed e para o HTML
+app_name() {
+    local name
+    name="$(env_value APP_NAME)"
+    printf '%s' "${name:-VEE Rádio}"
+}
+
 # curl com o token do ntfy (se houver) num ficheiro de configuração lido por um
 # descritor, e não na linha de comando, onde ficaria visível na lista de processos.
 # O <(...) tem de estar no próprio comando: guardado numa variável já vem fechado
@@ -61,10 +69,13 @@ send_ntfy() {
             fi
             ;;
     esac
-    # Os cabeçalhos vão só em ASCII. O texto vai pelo stdin, em bytes: se não
-    # chegar em UTF-8, o ntfy mostra-o como um anexo em vez da mensagem
-    printf 'Link do VEE Rádio: %s' "$1" | ntfy_curl "$token" -fsS --max-time 15 -o /dev/null \
-        -H "Title: VEE Radio" \
+    # Os cabeçalhos vão só em ASCII: o título (o nome da app, que pode ter acentos)
+    # vai codificado como no RFC 2047, que o ntfy descodifica. O texto vai pelo
+    # stdin, em bytes: se não chegar em UTF-8, o ntfy mostra-o como um anexo em vez da mensagem
+    local app
+    app="$(app_name)"
+    printf 'Link do %s: %s' "$app" "$1" | ntfy_curl "$token" -fsS --max-time 15 -o /dev/null \
+        -H "Title: =?UTF-8?B?$(printf '%s' "$app" | base64 | tr -d '\n')?=" \
         -H "Tags: radio" \
         -H "Click: $1" \
         -H "Actions: view, Abrir comando, $1" \
@@ -90,9 +101,10 @@ send_teams() {
         *[\"\\[:space:]]*) echo "O webhook do Teams tem caracteres inválidos (aspas, \\ ou espaços)."; return 1 ;;
     esac
     # O modelo dos Workflows só aceita um Adaptive Card dentro de attachments. O link
-    # do túnel só tem letras, números, - e . (vem do grep), por isso vai tal e qual no JSON.
-    # Em UTF-8 pelo stdin, por causa do "á"
-    printf '{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.4","body":[{"type":"TextBlock","text":"VEE Rádio","weight":"Bolder","size":"Medium"},{"type":"TextBlock","text":"Link do comando: %s","wrap":true}],"actions":[{"type":"Action.OpenUrl","title":"Abrir comando","url":"%s"}]}}]}' "$1" "$1" |
+    # do túnel só tem letras, números, - e . (vem do grep), e o nome da app não tem aspas
+    # duplas nem \ (o radio_web.py recusa-os), por isso vão tal e qual no JSON.
+    # Em UTF-8 pelo stdin, por causa dos acentos
+    printf '{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.4","body":[{"type":"TextBlock","text":"%s","weight":"Bolder","size":"Medium"},{"type":"TextBlock","text":"Link do comando: %s","wrap":true}],"actions":[{"type":"Action.OpenUrl","title":"Abrir comando","url":"%s"}]}}]}' "$(app_name)" "$1" "$1" |
         curl -K <(printf 'url = "%s"\n' "$webhook") -fsS --max-time 15 -o /dev/null \
             -H "Content-Type: application/json; charset=utf-8" \
             --data-binary @-
@@ -212,7 +224,7 @@ fi
 if [ "$SENT" = 0 ]; then
     [ "$TRIED" = 1 ] && echo "A abrir a página de partilha."
     mkdir -p "$LINK_DIR"
-    sed "s|__URL__|$URL|g" "$DIR/link.html" > "$LINK_DIR/index.html"
+    sed "s|__URL__|$URL|g; s|__NOME__|$(app_name)|g" "$DIR/link.html" > "$LINK_DIR/index.html"
     nohup python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &
     sleep 1
     termux-open-url "http://localhost:$LINK_PORT/" 2>/dev/null || true

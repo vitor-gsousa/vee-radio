@@ -481,6 +481,24 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .modal-box > form > .btn, .modal-box > .btn { width: 100%; }
 .close { position: absolute; top: 12px; right: 12px; }
 
+/* Configurações em separadores: rádios escondidos antes dos separadores e dos
+   painéis, e o :checked mostra o painel e marca o separador */
+.tab-radio { position: absolute; opacity: 0; pointer-events: none; }
+.config-tabs { margin: 0; }
+.config-tabs label {
+    display: inline-flex; align-items: center; padding: 9px 16px; border-radius: 999px; flex: none; cursor: pointer;
+    background: var(--surface-2); color: var(--text); font-size: 14px; font-weight: 700;
+}
+.config-tabs label:hover { background: var(--surface-3); }
+.tab-panel { display: none; flex-direction: column; gap: 12px; }
+#sep-geral:checked ~ .panel-geral, #sep-acesso:checked ~ .panel-acesso,
+#sep-atualizacoes:checked ~ .panel-atualizacoes { display: flex; }
+#sep-geral:checked ~ .config-tabs label[for="sep-geral"], #sep-acesso:checked ~ .config-tabs label[for="sep-acesso"],
+#sep-atualizacoes:checked ~ .config-tabs label[for="sep-atualizacoes"] { background: var(--text); color: #000; }
+#sep-geral:focus-visible ~ .config-tabs label[for="sep-geral"], #sep-acesso:focus-visible ~ .config-tabs label[for="sep-acesso"],
+#sep-atualizacoes:focus-visible ~ .config-tabs label[for="sep-atualizacoes"] { outline: 2px solid var(--accent, currentColor); outline-offset: 2px; }
+.tab-panel > form > .btn { width: 100%; }
+
 /* Reprodutor aberto (#tocar): no telemóvel sobe do fundo, como no Spotify */
 .sheet { padding: 0; align-items: flex-end; }
 .sheet .modal-box {

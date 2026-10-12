@@ -233,6 +233,10 @@
         var y = window.scrollY;
         var samePage = !url || new URL(url, location.href).pathname === location.pathname;
         document.title = doc.title;
+        // Só se troca o <body>: o título da app, se mudou nas Configurações, passa à mão
+        var meta = document.querySelector('meta[name="application-name"]');
+        var newMeta = doc.querySelector('meta[name="application-name"]');
+        if (meta && newMeta) meta.content = newMeta.content;
         document.body.innerHTML = doc.body.innerHTML;
         if (url) {
             history[push ? "pushState" : "replaceState"](null, "", url);
@@ -327,6 +331,12 @@
         }
     }
 
+    // O título do separador quando nada toca vem das Configurações (Geral), no <head>
+    function appTitle() {
+        var meta = document.querySelector('meta[name="application-name"]');
+        return meta ? meta.content : document.title;
+    }
+
     function updateTitle(station, playing) {
         if (station === undefined) {
             var el = document.querySelector(".player-station");
@@ -334,7 +344,7 @@
             station = el && !stop ? el.textContent : "";
             playing = !stop;
         }
-        document.title = playing && station ? "▶ " + station : "VEE Rádio";
+        document.title = playing && station ? "▶ " + station : appTitle();
     }
 
     // Atualiza a barra do reprodutor e a estação marcada a partir do /estado

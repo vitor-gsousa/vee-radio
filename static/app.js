@@ -368,7 +368,9 @@
         var player = document.querySelector(".player");
         if (player && state.player) {
             var fresh = new DOMParser().parseFromString(state.player, "text/html").querySelector(".player");
-            if (fresh && fresh.dataset.sig !== player.dataset.sig) {
+            // A meio de arrastar o volume, trocar a barra largava o slider
+            var dragging = document.activeElement && document.activeElement.matches(".player .vol-form input") && pointerDown;
+            if (fresh && fresh.dataset.sig !== player.dataset.sig && !dragging) {
                 // O logótipo é o mesmo se a estação não mudou: não volta a brilhar
                 var loaded = {};
                 player.querySelectorAll("img.loaded").forEach(function (img) { loaded[img.getAttribute("src")] = true; });
@@ -571,6 +573,13 @@
 
     document.addEventListener("input", function (e) {
         var t = e.target;
+        // Volume: o número e a parte cheia acompanham o dedo; só se envia ao largar
+        if (t.matches(".vol-form input")) {
+            t.style.setProperty("--vol", t.value + "%");
+            var num = t.closest(".volume").querySelector(".vol-num");
+            if (num) num.textContent = t.value + "%";
+            return;
+        }
         var clear = t.parentNode && t.parentNode.querySelector(".search-clear");
         if (clear) clear.hidden = !t.value;
         if (t.matches(".list-tools input")) return filterList(t);
@@ -588,6 +597,7 @@
     // depois de carregar num tema ou país, por isso aí não se envia nada
     document.addEventListener("change", function (e) {
         var t = e.target;
+        if (t.matches(".vol-form input")) return t.form.requestSubmit();
         if (t.form && t.form.id === "editar" && t.type === "checkbox") return updateSelection();
         if (t.matches(".list-tools select")) return t.form.requestSubmit();
         if (!t.closest(".filters")) return;
@@ -629,6 +639,12 @@
         open.open = false;
         open.querySelector("summary").focus();
     });
+
+    // Para não trocar a barra enquanto se arrasta o slider do volume
+    var pointerDown = false;
+    document.addEventListener("pointerdown", function () { pointerDown = true; });
+    document.addEventListener("pointerup", function () { pointerDown = false; });
+    document.addEventListener("pointercancel", function () { pointerDown = false; });
 
     document.addEventListener("submit", function (e) {
         e.preventDefault();

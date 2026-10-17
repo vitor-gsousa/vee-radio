@@ -34,7 +34,10 @@
     <div class="volume">
         <form action="/voldown" method="post"><button class="icon-btn" title="Baixar o volume" aria-label="Baixar o volume">{{ icon("speaker-low") }}</button></form>
         {% if volume >= 0 %}
-        <div class="volbar" title="Volume {{ volume }}%"><span style="width: {{ volume }}%"></span></div>
+        {# Arrasta-se e o script envia ao largar (change); sem script valem os botões #}
+        <form action="/volume" method="post" class="vol-form">
+            <input type="range" name="v" min="0" max="100" step="5" value="{{ volume }}" aria-label="Volume" style="--vol: {{ volume }}%">
+        </form>
         <span class="vol-num">{{ volume }}%</span>
         {% endif %}
         <form action="/volup" method="post"><button class="icon-btn" title="Subir o volume" aria-label="Subir o volume">{{ icon("speaker-high") }}</button></form>

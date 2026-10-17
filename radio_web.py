@@ -209,7 +209,9 @@ def mpd_client(client_class=RadioClient):
     # Com timeout: um MPD encravado deixava a rota (e o QUEUE_LOCK, se o tivesse) presa para sempre
     client = client_class()
     client.timeout = MPD_TIMEOUT
-    client.connect("localhost", 6600)
+    # O endereço onde o MPD escuta (bind_to_address), e não "localhost": se o nome
+    # der primeiro ::1, cada ligação esperava que o IPv6 fosse recusado (2 s no Windows)
+    client.connect("127.0.0.1", 6600)
     try:
         yield client
     finally:
@@ -2459,6 +2461,17 @@ def play():
 def stop():
     with QUEUE_LOCK, mpd_client() as c:
         c.stop()
+    return done()
+
+@app.route("/volume", methods=["POST"])
+def set_volume():
+    # O slider do reprodutor: o valor escolhido, de 0 a 100
+    try:
+        value = max(0, min(100, int(request.form.get("v", ""))))
+    except ValueError:
+        return error_page("Volume inválido", "O volume é um número de 0 a 100.", 400)
+    with mpd_client() as c:
+        c.setvol(value)
     return done()
 
 @app.route("/volup", methods=["POST"])

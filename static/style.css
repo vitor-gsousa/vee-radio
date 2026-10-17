@@ -465,9 +465,24 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .vote:hover { color: var(--love); }
 .vote-count { font-size: 12px; font-weight: 700; white-space: nowrap; }
 .volume { display: flex; align-items: center; gap: 6px; width: 100%; }
-.volbar { flex: 1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
-.volbar span { display: block; height: 100%; background: var(--text); border-radius: 2px; }
-.volume:hover .volbar span { background: var(--accent-fg); }
+/* Slider do volume: a parte cheia vem de --vol (o script atualiza-o ao arrastar) */
+.vol-form { flex: 1; display: flex; margin: 0; }
+.vol-form input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer;
+}
+.vol-form input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--text) var(--vol), var(--surface-3) var(--vol));
+}
+.vol-form input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.vol-form input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--text); }
+.vol-form input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border: 0; border-radius: 50%; background: var(--text);
+}
+.vol-form input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text); }
+.volume:hover .vol-form input[type="range"]::-webkit-slider-runnable-track {
+    background: linear-gradient(to right, var(--accent-fg) var(--vol), var(--surface-3) var(--vol));
+}
+.vol-form input[type="range"]:focus-visible { outline: 2px solid var(--accent-fg); outline-offset: 2px; border-radius: 4px; }
 .vol-num { min-width: 36px; font-size: 12px; color: var(--muted); text-align: right; }
 
 /* Janelas (modais): só para coisas pequenas */

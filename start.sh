@@ -150,7 +150,27 @@ start_mpd() {
         # e estivesse na playlist carregada, a página tratava-a como experiência
         rm -f ~/.config/vee-radio/a-ouvir.json
         [ -n "$active" ] && { mpc load "$active" >/dev/null 2>&1 || true; }
+    elif [ -n "$active" ] && stale_queue "$active"; then
+        echo "A fila do MPD era mais antiga do que a playlist «$active»: a carregar a playlist."
+        mpc clear >/dev/null 2>&1
+        rm -f ~/.config/vee-radio/a-ouvir.json
+        mpc load "$active" >/dev/null 2>&1 || true
     fi
+}
+
+# O MPD grava a fila de 10 em 10 s. Se foi morto logo depois de uma mudança, volta
+# com a fila de antes, e a sincronização seguinte do comando web gravava-a por
+# cima da playlist. Conta como antiga quando a playlist é mais recente do que o
+# estado do MPD e as estações não batem certo: falta alguma na fila, ou a fila tem
+# mais do que uma a mais (uma pode ser a que se estava a experimentar)
+stale_queue() {
+    local m3u="$HOME/.config/mpd/playlists/$1.m3u" state="$HOME/.config/mpd/state"
+    [ -f "$m3u" ] && [ -f "$state" ] && [ "$m3u" -nt "$state" ] || return 1
+    local saved queue
+    saved="$(grep -v '^#' "$m3u" | tr -d '\r' | grep . | sort -u)"
+    queue="$(mpc -f '%file%' playlist 2>/dev/null | sort -u)"
+    [ -n "$(comm -23 <(echo "$saved") <(echo "$queue"))" ] && return 0
+    [ "$(comm -13 <(echo "$saved") <(echo "$queue") | grep -c .)" -gt 1 ]
 }
 
 start_web() {

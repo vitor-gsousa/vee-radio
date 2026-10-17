@@ -225,11 +225,16 @@ share_link() {
 # volta a arrancar o que tiver parado. Um túnel novo tem outro link, que se envia
 # outra vez. Sem internet, espera cada vez mais entre tentativas, até 10 min
 supervise() {
-    local tunnel=0 web_fails=0 tunnel_wait=0 tunnel_next=0
+    local tunnel=0 web_fails=0 tunnel_wait=0 tunnel_next=0 backup_tick=0
     # Lido uma vez, como no arranque: "Guardar" nas Configurações só se aplica no próximo start.sh
     tunnel_enabled && tunnel=1
     while true; do
         sleep "$SUPERVISOR_INTERVAL"
+        # De hora a hora (120 voltas), a cópia de segurança diária, se ainda não houver uma de hoje
+        if [ "$backup_tick" = 0 ]; then
+            "$DIR/backup.sh" --se-preciso | sed "s/^/$(date '+%F %T') /"
+        fi
+        backup_tick=$(( (backup_tick + 1) % 120 ))
         if ! pgrep -x mpd >/dev/null; then
             echo "$(date '+%F %T') O MPD parou: a arrancar outra vez."
             start_mpd

@@ -15,7 +15,7 @@ FAILED_FILE="$HOME/.config/vee-radio/versao-falhada"
 # Importa o comando web e compila os templates, sem arrancar nada: apanha erros de
 # sintaxe, imports em falta e templates partidos antes de parar a música
 code_ok() {
-    for f in start.sh stop.sh config.sh update.sh install.sh; do
+    for f in start.sh stop.sh config.sh update.sh install.sh backup.sh; do
         bash -n "$f" || return 1
     done
     python - <<'EOF' >/dev/null
@@ -42,7 +42,7 @@ roll_back() {
         echo "$1, e não foi possível voltar à versão anterior: atualiza à mão no Termux."
         return 1
     fi
-    chmod +x start.sh stop.sh config.sh update.sh install.sh
+    chmod +x start.sh stop.sh config.sh update.sh install.sh backup.sh
     echo "$1: voltou-se à versão $(git log -1 --format='%h')."
 }
 
@@ -87,7 +87,7 @@ if ! git merge --ff-only --quiet '@{u}'; then
     echo "Não foi possível atualizar (ficheiros alterados à mão?): fica a versão atual."
     exit 1
 fi
-chmod +x start.sh stop.sh config.sh update.sh install.sh
+chmod +x start.sh stop.sh config.sh update.sh install.sh backup.sh
 if ! code_ok; then
     roll_back "A versão nova tem erros"
     exit 1

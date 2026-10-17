@@ -13,6 +13,7 @@ Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://t
 | `mpd.conf` | Configuração do MPD (saída de áudio OpenSLES, porta `6600`) |
 | `start.sh` / `stop.sh` | Arrancar e parar o MPD, o servidor web e o túnel |
 | `config.sh` | Abre as configurações do comando no browser do telemóvel |
+| `backup.sh` | Cópia de segurança das playlists (feita sozinha todos os dias) e reposição |
 | `.env.example` | Modelo da configuração local (tópico do ntfy, webhook do Teams); a cópia `.env` não vai para o git |
 | `link.html` | Página que mostra o link do túnel no telemóvel, com botões para copiar e partilhar |
 
@@ -138,6 +139,27 @@ Para a rádio arrancar sozinha sempre que o telemóvel liga:
 3. Nas definições do Android, desativa a otimização de bateria para o **Termux** e para o **Termux:Boot**.
 
 No arranque, o script corre primeiro o `~/update.sh`, que vai buscar a versão mais recente ao GitHub (espera até 30 segundos pela rede; sem ela fica a versão que já estava), e depois o `~/start.sh`: a rádio e o comando local arrancam logo e, com o túnel ligado, espera-se até 2 minutos pela internet antes de o criar. O script fica em `~/.termux/boot/vee-radio`, é criado pelo `install.sh`, e o que acontece no arranque fica registado em `~/boot.log`.
+
+## Cópias de segurança
+
+Uma vez por dia, o vigia guarda as playlists num `.tar.gz` em `Documents/vee-radio` no armazenamento do telemóvel. Sem acesso ao armazenamento, a pasta é `~/vee-radio-copias`. Ficam as 7 cópias mais recentes. Como estão fora do Termux, sobrevivem a desinstalá-lo.
+
+Cada cópia leva:
+- as playlists;
+- os nomes escritos à mão;
+- a playlist ativa;
+- as rádios ouvidas recentemente;
+- os logótipos escolhidos.
+
+O `.env` (com o token do ntfy e o webhook do Teams) e a chave das Configurações ficam de fora, porque no armazenamento partilhado outras apps conseguiam lê-los.
+
+```bash
+~/backup.sh                     # faz uma cópia agora
+~/backup.sh --repor             # repõe a cópia mais recente
+~/backup.sh --repor <ficheiro>  # repõe uma cópia em particular
+```
+
+Antes de repor, o `backup.sh` guarda o estado atual numa cópia nova, para se poder voltar atrás. Depois para a rádio, repõe os ficheiros e volta a arrancar com a playlist ativa da cópia. As playlists criadas depois da cópia mantêm-se.
 
 ## Atualizar
 

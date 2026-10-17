@@ -47,7 +47,7 @@ main() {
     else
         git clone "$REPO_URL" "$INSTALL_DIR"
     fi
-    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh" "$INSTALL_DIR/update.sh"
+    chmod +x "$INSTALL_DIR/start.sh" "$INSTALL_DIR/stop.sh" "$INSTALL_DIR/config.sh" "$INSTALL_DIR/update.sh" "$INSTALL_DIR/backup.sh"
     # Configuração local (tópico do ntfy, webhook do Teams); nunca se substitui um .env que já exista
     if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
         cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
@@ -65,6 +65,7 @@ main() {
     ln -sf "$INSTALL_DIR/stop.sh" ~/stop.sh
     ln -sf "$INSTALL_DIR/config.sh" ~/config.sh
     ln -sf "$INSTALL_DIR/update.sh" ~/update.sh
+    ln -sf "$INSTALL_DIR/backup.sh" ~/backup.sh
 
     echo "=== 7. A configurar o arranque automático (Termux:Boot) ==="
     mkdir -p ~/.termux/boot

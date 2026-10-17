@@ -135,6 +135,8 @@ A rádio atualiza-se sozinha sempre que o telemóvel arranca (com o Termux:Boot)
 
 O `update.sh` só avança para a versão do GitHub: se houver alterações locais que o impeçam, não mexe em nada e fica a versão atual. Quando o `install.sh` muda, corre-o também (atualiza os pacotes, por isso demora uns minutos). As playlists e os nomes guardados mantêm-se.
 
+Uma versão nova com erros não fica instalada. Antes de reiniciar, o `update.sh` confirma que o comando web importa e que os templates compilam. Depois de reiniciar, espera até 30 segundos que o comando web responda. Se alguma destas verificações falhar, volta à versão anterior e anota a que falhou em `~/.config/vee-radio/versao-falhada`, para não a voltar a instalar. Atualiza outra vez quando houver uma versão mais recente.
+
 Numa instalação anterior a esta opção, atualiza uma vez à mão, para ficares com o `~/update.sh` e o novo arranque automático:
 
 ```bash

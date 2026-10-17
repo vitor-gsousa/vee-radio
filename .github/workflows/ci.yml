@@ -1,0 +1,44 @@
+# Verificações rápidas a cada push: o telemóvel vai buscar a main no arranque
+# (update.sh --boot), por isso um erro aqui chegava à rádio
+name: Verificar
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependências
+        run: pip install flask python-mpd2 pyflakes
+
+      - name: Python (pyflakes)
+        run: python -m pyflakes radio_web.py
+
+      # O mesmo que o update.sh faz antes de aceitar uma versão nova
+      - name: Importar o comando web e compilar os templates
+        run: |
+          HOME="$(mktemp -d)" python - <<'EOF'
+          import radio_web
+          env = radio_web.app.jinja_env
+          for name in env.list_templates():
+              env.get_template(name)
+          EOF
+
+      - name: Scripts (shellcheck)
+        run: shellcheck -S warning *.sh
+
+      # O Termux não aceita CRLF nos scripts
+      - name: Fins de linha LF
+        run: |
+          if git grep -lI $'\r' -- '*.sh'; then
+            echo "Ficheiros com CRLF (acima)."
+            exit 1
+          fi

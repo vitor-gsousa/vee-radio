@@ -279,6 +279,41 @@ MAX_PLAYLIST_BYTES = 200
 def safe_url(url):
     return bool(url) and len(url) <= MAX_URL and bool(STREAM_URL_RE.match(url)) and not CONTROL_RE.search(url)
 
+# Nomes que só existem na rede local (mDNS, routers domésticos)
+LOCAL_SUFFIXES = (".local", ".localhost", ".lan", ".home", ".internal", ".home.arpa")
+LOCAL_STREAM = ("Endereço da rede local", "Só se juntam rádios da internet: esse endereço aponta para a rede local "
+                "ou não foi encontrado. No próprio telemóvel, as da rede local são aceites.", 400)
+
+def public_host(host):
+    # Todos os IPs do nome são públicos. Um nome que não resolve também fica de fora:
+    # o MPD não o conseguia tocar
+    host = (host or "").rstrip(".").lower()
+    if not host or host == "localhost" or host.endswith(LOCAL_SUFFIXES):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError):
+        return False
+    return all(ipaddress.ip_address(i[4][0].split("%")[0]).is_global for i in infos)
+
+def public_streams(urls):
+    # Os URLs (já passados pelo safe_url) que apontam para a internet. Os streams vêm
+    # de quem usa o link público e é o MPD que lhes liga: sem isto, o telemóvel fazia
+    # pedidos ao router e a outros aparelhos da rede local (e o vigia repetia-os).
+    # Não segura um DNS que mude de resposta entre esta verificação e o MPD, mas
+    # tira os casos diretos. No próprio telemóvel aceita-se tudo (uma rádio da rede de casa)
+    if is_local():
+        return set(urls)
+    hosts = {}
+    for u in urls:
+        try:
+            hosts.setdefault(urllib.parse.urlsplit(u).hostname, []).append(u)
+        except ValueError:
+            pass
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        public = dict(zip(hosts, pool.map(public_host, hosts)))
+    return {u for h, us in hosts.items() if public[h] for u in us}
+
 def clean_name(name):
     # Junta espaços e quebras de linha para o nome não partir o formato m3u
     return " ".join((name or "").split())[:MAX_NAME]
@@ -2076,13 +2111,14 @@ def add_theme():
         return error_page(*BAD_NAME)
     logos = [l if LOGO_URL_RE.match(l) else None for l in request.form.getlist("logo")]
     picked = list(zip(request.form.getlist("url"), request.form.getlist("name"), logos))
+    public = public_streams([u for u, _, _ in picked if safe_url(u)])
     remember_uuids(zip(request.form.getlist("url"), request.form.getlist("uuid")))
     remember_versions(request.form.getlist("url"))
     with QUEUE_LOCK, mpd_client() as c:
         existed = os.path.isfile(path)
         entries = read_m3u(path)
         known = {u for u, _, _ in entries}
-        new = [(u, clean_name(n) or None, l) for u, n, l in picked if safe_url(u) and u not in known]
+        new = [(u, clean_name(n) or None, l) for u, n, l in picked if u in public and u not in known]
         if target == active_playlist():
             # A playlist está a tocar: junta à fila e sincroniza. O ficheiro é escrito
             # antes para a sincronização encontrar os nomes e logótipos das novas.
@@ -2349,6 +2385,8 @@ def listen():
     logo = request.form.get("logo", "").strip()
     if not safe_url(url):
         return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://.", 400)
+    if not public_streams([url]):
+        return error_page(*LOCAL_STREAM)
     remember_uuids([(url, request.form.get("uuid", ""))])
     remember_versions([url])
     with QUEUE_LOCK, mpd_client() as c:
@@ -2433,6 +2471,8 @@ def add_stream():
     if url and not safe_url(url):
         return error_page("Endereço inválido", "O endereço do stream tem de começar por http:// ou https://, "
                           "não pode ter quebras de linha e tem de ter menos de 2048 caracteres.", 400)
+    if url and not public_streams([url]):
+        return error_page(*LOCAL_STREAM)
     # "Nova playlist" no menu do +: cria-a já com esta rádio, sem a pôr a tocar
     new_list = request.form.get("nova_playlist", "").strip() if request.form.get("criar") else None
     if new_list is not None and playlist_path(new_list) is None:

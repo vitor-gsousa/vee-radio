@@ -57,6 +57,20 @@ Quando o túnel fica pronto, o browser do telemóvel abre uma página com o link
 
 O link muda sempre que o `start.sh` corre.
 
+### Vigia
+
+O `start.sh` deixa um vigia a correr em segundo plano. A cada 30 segundos, confirma que o MPD, o servidor web e o túnel estão de pé, e volta a arrancar o que tiver parado. O que faz fica registado em `~/vigia.log`.
+
+- **Túnel novo:** quando o túnel cai e é preciso criar outro, o link muda, e o vigia envia o novo como no arranque (ntfy, Teams ou a página de partilha).
+- **Sem internet:** vai tentando outra vez, primeiro ao fim de 1 minuto e depois a intervalos cada vez maiores, até 10 minutos.
+- **Logs:** os anteriores (`~/web.log.1`, `~/tunnel.log.1`) mantêm-se, para se ver o erro que fez parar um serviço.
+
+No Android 12 e seguintes, o sistema pode matar processos do Termux em segundo plano (o "phantom process killer"), o vigia incluído. Para o desligar, liga o telemóvel a um computador com depuração USB e corre:
+
+```bash
+adb shell device_config put activity_manager max_phantom_processes 2147483647
+```
+
 ### Receber o link por notificação (ntfy)
 
 Para não teres de pegar no telemóvel da rádio, o `start.sh` pode enviar o link para um tópico do [ntfy](https://ntfy.sh). Instala a app ntfy no teu telemóvel, subscreve um tópico e escreve-o no ficheiro `~/vee-radio/.env` (o `install.sh` cria-o a partir do `.env.example`):
@@ -188,8 +202,8 @@ Cada estação aparece num cartão com o seu logótipo:
 
 | Problema | O que ver |
 | --- | --- |
-| O link não aparece | `~/tunnel.log`. O telemóvel tem de ter internet. Volta a correr o `~/start.sh`. |
-| O comando web dá erro ou não abre | `~/web.log` |
+| O link não aparece | `~/tunnel.log` e `~/vigia.log`. O telemóvel tem de ter internet; o vigia volta a tentar sozinho e envia o link quando o tiver. |
+| O comando web dá erro ou não abre | `~/web.log` (e `~/web.log.1`, o anterior a reiniciar) |
 | A página diz "MPD indisponível" | O MPD parou. Corre o `~/start.sh`. |
 | Não arrancou sozinho depois de ligar o telemóvel | `~/boot.log`. Confirma os passos do [arranque automático](#arranque-automático). |
 | A rádio para ao fim de algum tempo | O Android está a matar o Termux. Desativa a otimização de bateria para o Termux. |

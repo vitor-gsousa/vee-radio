@@ -4,8 +4,11 @@ LINK_PORT=8081
 LINK_DIR="$HOME/.vee-radio-link"
 CONFIG_KEY_FILE="$HOME/.config/vee-radio/chave"
 # --boot: chamado pelo Termux:Boot, quando a rede ainda pode não estar pronta
+# --vigiar: o vigia que o próprio start.sh deixa em segundo plano (ver supervise)
 BOOT=0
 [ "${1:-}" = "--boot" ] && BOOT=1
+SUPERVISOR_LOG="$HOME/vigia.log"
+SUPERVISOR_INTERVAL=30
 
 # Lê um valor do .env (KEY=valor), sem o executar como código; aceita aspas
 # e terminações de linha do Windows
@@ -123,7 +126,152 @@ stop_and_wait() {
     sleep 0.5
 }
 
+# Guarda o log anterior em .1 em vez de o apagar: depois de uma queda, o erro
+# que a causou ainda lá está
+rotate_log() {
+    [ -f "$1" ] && mv -f "$1" "$1.1"
+    return 0
+}
+
+start_mpd() {
+    mpd
+    # Num telemóvel lento o MPD pode demorar a aceitar ligações; sem isto, a fila
+    # parecia vazia e a playlist ativa não era carregada
+    for _ in $(seq 1 50); do
+        mpc status >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+    # O MPD restaura a fila sozinho; se vier vazia, volta a carregar a playlist ativa
+    # do comando web (evita duplicados)
+    local active
+    active="$(cat ~/.config/mpd/playlist-ativa.txt 2>/dev/null)"
+    if [ -z "$(mpc playlist 2>/dev/null)" ]; then
+        # A rádio que se estava a experimentar já não está na fila. Se ficasse marcada
+        # e estivesse na playlist carregada, a página tratava-a como experiência
+        rm -f ~/.config/vee-radio/a-ouvir.json
+        [ -n "$active" ] && { mpc load "$active" >/dev/null 2>&1 || true; }
+    fi
+}
+
+start_web() {
+    rotate_log ~/web.log
+    nohup python "$DIR/radio_web.py" > ~/web.log 2>&1 &
+}
+
+# Qualquer resposta HTTP serve (com o MPD em baixo o /estado dá erro, mas o
+# servidor está vivo); só conta como parado quando não responde de todo
+web_answers() {
+    curl -s -o /dev/null --max-time 10 http://127.0.0.1:8080/estado
+}
+
+# Cria o túnel e espera pelo link, que só aparece no log depois de o túnel estar
+# criado. Escreve-o em ~/tunnel-url.txt e em $URL. Sem link em 60 s desiste e
+# para o cloudflared, para o vigia tentar outra vez mais tarde
+start_tunnel() {
+    rotate_log ~/tunnel.log
+    rm -f ~/tunnel-url.txt
+    nohup cloudflared tunnel --url http://localhost:8080 > ~/tunnel.log 2>&1 &
+    URL=""
+    for _ in $(seq 1 60); do
+        URL="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log 2>/dev/null | grep -v '//api\.' | head -n 1)"
+        [ -n "$URL" ] && break
+        sleep 1
+    done
+    if [ -z "$URL" ]; then
+        stop_and_wait -f "cloudflared tunnel"
+        return 1
+    fi
+    echo "$URL" > ~/tunnel-url.txt
+}
+
+# O link vai para cada destino que estiver no .env (tópico do ntfy, webhook do
+# Teams). Se não houver nenhum, ou se nenhum envio correr bem, abre-se uma página
+# só no próprio telemóvel (127.0.0.1) para copiar ou partilhar o link à mão
+share_link() {
+    local sent=0 tried=0
+    if [ -n "$(env_value NTFY_TOPIC_URL)" ]; then
+        tried=1
+        if send_ntfy "$1"; then
+            echo "Link enviado para o tópico do ntfy."
+            sent=1
+        else
+            echo "Não foi possível enviar o link para o ntfy."
+        fi
+    fi
+    if [ -n "$(env_value TEAMS_WEBHOOK_URL)" ]; then
+        tried=1
+        if send_teams "$1"; then
+            echo "Link enviado para o Teams."
+            sent=1
+        else
+            echo "Não foi possível enviar o link para o Teams."
+        fi
+    fi
+    if [ "$sent" = 0 ]; then
+        [ "$tried" = 1 ] && echo "A abrir a página de partilha."
+        stop_and_wait -f "http.server $LINK_PORT"
+        mkdir -p "$LINK_DIR"
+        sed "s|__URL__|$1|g; s|__NOME__|$(app_name)|g" "$DIR/link.html" > "$LINK_DIR/index.html"
+        nohup python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &
+        sleep 1
+        termux-open-url "http://localhost:$LINK_PORT/" 2>/dev/null || true
+    fi
+}
+
+# O vigia. O Android pode matar processos do Termux (a partir do Android 12, o
+# "phantom process killer"), e o cloudflared sai quando perde a rede. A cada 30 s
+# volta a arrancar o que tiver parado. Um túnel novo tem outro link, que se envia
+# outra vez. Sem internet, espera cada vez mais entre tentativas, até 10 min
+supervise() {
+    local tunnel=0 web_fails=0 tunnel_wait=0 tunnel_next=0
+    # Lido uma vez, como no arranque: "Guardar" nas Configurações só se aplica no próximo start.sh
+    tunnel_enabled && tunnel=1
+    while true; do
+        sleep "$SUPERVISOR_INTERVAL"
+        if ! pgrep -x mpd >/dev/null; then
+            echo "$(date '+%F %T') O MPD parou: a arrancar outra vez."
+            start_mpd
+        fi
+        # Um servidor encravado também conta, ao fim de três falhas seguidas (1 min e meio)
+        if pgrep -f radio_web.py >/dev/null && web_answers; then
+            web_fails=0
+        else
+            web_fails=$((web_fails + 1))
+            if ! pgrep -f radio_web.py >/dev/null || [ "$web_fails" -ge 3 ]; then
+                echo "$(date '+%F %T') O comando web não responde: a arrancar outra vez."
+                stop_and_wait -f radio_web.py
+                start_web
+                web_fails=0
+            fi
+        fi
+        [ "$tunnel" = 1 ] || continue
+        if pgrep -f "cloudflared tunnel" >/dev/null; then
+            tunnel_wait=0
+            continue
+        fi
+        [ "$(date +%s)" -ge "$tunnel_next" ] || continue
+        echo "$(date '+%F %T') O túnel parou: a criar outro."
+        if start_tunnel; then
+            echo "$(date '+%F %T') Link novo: $URL"
+            share_link "$URL"
+            tunnel_wait=0
+        else
+            tunnel_wait=$(( tunnel_wait ? tunnel_wait * 2 : 60 ))
+            [ "$tunnel_wait" -gt 600 ] && tunnel_wait=600
+            tunnel_next=$(( $(date +%s) + tunnel_wait ))
+            echo "$(date '+%F %T') Sem link do túnel: tenta outra vez daqui a ${tunnel_wait} s."
+        fi
+    done
+}
+
+if [ "${1:-}" = "--vigiar" ]; then
+    supervise
+    exit 0
+fi
+
 termux-wake-lock 2>/dev/null || true
+# O vigia primeiro, para não voltar a arrancar o que se está a parar
+stop_and_wait -f "start.sh --vigiar"
 stop_and_wait -f cloudflared
 stop_and_wait -f "http.server $LINK_PORT"
 stop_and_wait -f radio_web.py
@@ -131,25 +279,13 @@ stop_and_wait -x mpd
 rm -f ~/tunnel-url.txt
 
 echo "A iniciar MPD..."
-mpd
-# Num telemóvel lento o MPD pode demorar a aceitar ligações; sem isto, a fila
-# parecia vazia e a playlist ativa não era carregada
-for _ in $(seq 1 50); do
-    mpc status >/dev/null 2>&1 && break
-    sleep 0.2
-done
-# O MPD restaura a fila sozinho; se vier vazia, volta a carregar a playlist ativa
-# do comando web (evita duplicados)
-ACTIVE="$(cat ~/.config/mpd/playlist-ativa.txt 2>/dev/null)"
-if [ -z "$(mpc playlist 2>/dev/null)" ]; then
-    # A rádio que se estava a experimentar já não está na fila. Se ficasse marcada
-    # e estivesse na playlist carregada, a página tratava-a como experiência
-    rm -f ~/.config/vee-radio/a-ouvir.json
-    [ -n "$ACTIVE" ] && { mpc load "$ACTIVE" >/dev/null 2>&1 || true; }
-fi
+start_mpd
 
 echo "A iniciar servidor Web (porta 8080)..."
-nohup python "$DIR/radio_web.py" > ~/web.log 2>&1 &
+start_web
+
+rotate_log "$SUPERVISOR_LOG"
+nohup "$DIR/start.sh" --vigiar > "$SUPERVISOR_LOG" 2>&1 &
 
 # Sem túnel (TUNNEL_ENABLED=0 no .env, ou desligado nas Configurações do comando):
 # o comando fica só neste telemóvel e na rede local, e abre-se já no browser
@@ -181,54 +317,13 @@ if [ "$BOOT" = 1 ]; then
 fi
 
 echo "A iniciar Cloudflare Tunnel..."
-nohup cloudflared tunnel --url http://localhost:8080 > ~/tunnel.log 2>&1 &
-
-# O link só aparece no log depois de o túnel estar criado
-URL=""
-for _ in $(seq 1 60); do
-    URL="$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log 2>/dev/null | grep -v '//api\.' | head -n 1)"
-    [ -n "$URL" ] && break
-    sleep 1
-done
-
-if [ -z "$URL" ]; then
-    echo "Não foi possível obter o link do túnel. Vê o ~/tunnel.log."
+if ! start_tunnel; then
+    echo "Ainda não foi possível obter o link do túnel (vê o ~/tunnel.log)."
+    echo "O vigia tenta outra vez em segundo plano e envia o link quando o tiver."
     echo "Na rede local, o comando continua em http://<IP-do-telemóvel>:8080"
     exit 1
 fi
-echo "$URL" > ~/tunnel-url.txt
-
-# O link vai para cada destino que estiver no .env (tópico do ntfy, webhook do
-# Teams). Se não houver nenhum, ou se nenhum envio correr bem, abre-se uma página
-# só no próprio telemóvel (127.0.0.1) para copiar ou partilhar o link à mão
-SENT=0
-TRIED=0
-if [ -n "$(env_value NTFY_TOPIC_URL)" ]; then
-    TRIED=1
-    if send_ntfy "$URL"; then
-        echo "Link enviado para o tópico do ntfy."
-        SENT=1
-    else
-        echo "Não foi possível enviar o link para o ntfy."
-    fi
-fi
-if [ -n "$(env_value TEAMS_WEBHOOK_URL)" ]; then
-    TRIED=1
-    if send_teams "$URL"; then
-        echo "Link enviado para o Teams."
-        SENT=1
-    else
-        echo "Não foi possível enviar o link para o Teams."
-    fi
-fi
-if [ "$SENT" = 0 ]; then
-    [ "$TRIED" = 1 ] && echo "A abrir a página de partilha."
-    mkdir -p "$LINK_DIR"
-    sed "s|__URL__|$URL|g; s|__NOME__|$(app_name)|g" "$DIR/link.html" > "$LINK_DIR/index.html"
-    nohup python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &
-    sleep 1
-    termux-open-url "http://localhost:$LINK_PORT/" 2>/dev/null || true
-fi
+share_link "$URL"
 
 echo ""
 echo "Link do comando: $URL"

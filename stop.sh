@@ -1,5 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 echo "A parar serviços..."
+# O vigia primeiro, senão voltava a arrancar o resto
+pkill -f "start.sh --vigiar" 2>/dev/null || true
 pkill -f cloudflared 2>/dev/null || true
 pkill -f "http.server 8081" 2>/dev/null || true
 pkill -f radio_web.py 2>/dev/null || true

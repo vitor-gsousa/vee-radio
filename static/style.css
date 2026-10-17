@@ -540,6 +540,13 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 .toast.ok { background: var(--ok); color: #04210f; }
+/* Sem ligação (o script põe-na quando o estado deixa de chegar): no topo, por cima de tudo */
+.link-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 45; padding: calc(8px + env(safe-area-inset-top)) 16px 8px;
+    background: var(--warn); color: #1d1300; font-size: 13px; font-weight: 800; text-align: center;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+body.offline .player { opacity: 0.6; }
 body.busy { cursor: progress; }
 body.busy::before {
     content: ""; position: fixed; top: 0; left: 0; z-index: 50; height: 3px; width: 40%; background: var(--accent-fg);

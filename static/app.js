@@ -262,6 +262,7 @@
         scheduleUndo();
         restoreFilters();
         updateSelection();
+        showLink();
     }
 
     async function handle(response, url, push) {
@@ -412,10 +413,50 @@
             var response = await fetch("/estado?sig=" + encodeURIComponent(sig), { headers: HEADERS });
             // Entretanto carregou-se num botão: este estado é de antes e já não vale
             if (seq !== stateSeq) return;
-            if (response.ok) updatePlayer(await response.json());
+            if (response.ok) {
+                noteLink(null);
+                updatePlayer(await response.json());
+            } else {
+                // 503 é do comando web (o MPD não responde); 502, 504 e 52x são da
+                // Cloudflare quando o túnel ou o comando web caíram
+                noteLink(response.status === 503 ? LINK_MPD
+                    : response.status === 502 || response.status === 504 || response.status >= 520 ? LINK_DOWN : null);
+            }
         } catch (e) {
             // Sem rede: tenta outra vez no próximo ciclo
+            noteLink(LINK_DOWN);
         }
+    }
+
+    // Faixa fixa quando o estado deixa de chegar: o reprodutor deixava de mudar sem
+    // se perceber porquê. Só depois de duas falhas seguidas (10 s), para uma falha
+    // isolada da rede não a fazer piscar
+    var LINK_DOWN = "Sem ligação ao telemóvel. A tentar outra vez…";
+    var LINK_MPD = "O MPD não está a responder. A tentar outra vez…";
+    var linkFails = 0;
+    var linkProblem = null;
+
+    function noteLink(problem) {
+        linkFails = problem ? linkFails + 1 : 0;
+        linkProblem = problem && linkFails >= 2 ? problem : null;
+        showLink();
+    }
+
+    // Também depois de trocar a página, que leva a faixa com o resto do <body>
+    function showLink() {
+        var bar = document.querySelector(".link-bar");
+        document.body.classList.toggle("offline", !!linkProblem);
+        if (!linkProblem) {
+            if (bar) bar.remove();
+            return;
+        }
+        if (!bar) {
+            bar = document.createElement("div");
+            bar.className = "link-bar";
+            bar.setAttribute("role", "status");
+            document.body.appendChild(bar);
+        }
+        bar.textContent = linkProblem;
     }
 
     // Sem acentos nem maiúsculas, como o plain_text do servidor

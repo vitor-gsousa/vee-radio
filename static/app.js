@@ -37,7 +37,16 @@
         el.className = ok ? "toast ok" : "toast";
         el.textContent = text;
         document.body.appendChild(el);
-        setTimeout(function () { el.remove(); }, 4000);
+        // As mensagens de erro do servidor são mais compridas: ficam o tempo de as ler
+        setTimeout(function () { el.remove(); }, Math.max(4000, text.length * 60));
+    }
+
+    // O título e a explicação de uma página de erro (error.html), numa linha
+    function errorText(html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var parts = [doc.querySelector("h1"), doc.querySelector(".error-page p")]
+            .filter(Boolean).map(function (el) { return el.textContent.trim(); });
+        return parts.join(". ") || "Não foi possível fazer isso. Tenta outra vez.";
     }
 
     // As janelas abrem com :target, mas o :target não acompanha o history.pushState
@@ -267,7 +276,13 @@
         var type = response.headers.get("Content-Type") || "";
         if (type.indexOf("application/json") !== -1) return updatePlayer(await response.json());
         if (response.status === 204) return true;
-        // Páginas de erro também chegam aqui e substituem a página, como sem script
+        // O erro de um botão (envio sem url) fica num aviso: trocar a página pela de
+        // erro tirava o reprodutor e parava a atualização do estado. Nas navegações,
+        // a página de erro substitui a página, como sem script
+        if (!url && !response.ok) {
+            toast(errorText(await response.text()));
+            return false;
+        }
         swap(await response.text(), response.ok ? url : null, push);
         // "A reiniciar": o cabeçalho Refresh só vale para a navegação normal, por
         // isso volta-se à página principal à mão quando passar o tempo indicado

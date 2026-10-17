@@ -2335,13 +2335,16 @@ def listen():
         song = next((s for s in c.playlistinfo() if s["file"] == url), None)
         if song:
             # Já está na lista (ou já se está a experimentar): só a toca
-            c.playid(song["id"])
             drop_preview(c, keep_url=url)
+            replay(c, song["id"])
         else:
+            # Marca-se como experiência antes do play: se o stream não ligar, o play
+            # dá erro e, sem a marca, a entrada passava por estação da lista e o
+            # próximo sync_active gravava-a no .m3u. O vigia volta a tentar
             song_id = c.addid(url)
-            c.playid(song_id)
             drop_preview(c)
             set_preview({"url": url, "name": name or None, "logo": logo if LOGO_URL_RE.match(logo) else None})
+            replay(c, song_id)
     warm_logos([url])
     return done()
 

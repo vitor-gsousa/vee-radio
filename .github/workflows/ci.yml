@@ -17,7 +17,7 @@ jobs:
           python-version: "3.12"
 
       - name: Dependências
-        run: pip install flask python-mpd2 pyflakes
+        run: pip install flask python-mpd2 pyflakes pytest
 
       - name: Python (pyflakes)
         run: python -m pyflakes radio_web.py
@@ -31,6 +31,9 @@ jobs:
           for name in env.list_templates():
               env.get_template(name)
           EOF
+
+      - name: Testes (pytest)
+        run: python -m pytest -q tests
 
       - name: Scripts (shellcheck)
         run: shellcheck -S warning *.sh

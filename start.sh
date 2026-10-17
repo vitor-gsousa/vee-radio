@@ -212,7 +212,9 @@ share_link() {
         stop_and_wait -f "http.server $LINK_PORT"
         mkdir -p "$LINK_DIR"
         sed "s|__URL__|$1|g; s|__NOME__|$(app_name)|g" "$DIR/link.html" > "$LINK_DIR/index.html"
-        nohup python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &
+        # Fecha ao fim de 10 min: o link é a chave de acesso, e qualquer app do
+        # telemóvel consegue abrir localhost:8081. A página já aberta continua a funcionar
+        nohup timeout 600 python -m http.server $LINK_PORT --bind 127.0.0.1 --directory "$LINK_DIR" > /dev/null 2>&1 &
         sleep 1
         termux-open-url "http://localhost:$LINK_PORT/" 2>/dev/null || true
     fi

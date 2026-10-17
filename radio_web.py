@@ -97,6 +97,7 @@ STATS_FILE = os.path.expanduser("~/.cache/vee-radio/stats.json")
 STATS_MAX_AGE = 24 * 3600
 # Depois de uma falha de rede, volta a tentar passada uma hora
 STATS_RETRY_SECONDS = 3600
+MPD_TIMEOUT = 15
 # Muda quando se juntam campos às entradas, para as antigas serem atualizadas
 STATS_VERSION = 3
 # O radio-browser só aceita um voto por IP na mesma rádio a cada 10 minutos
@@ -205,7 +206,9 @@ class RadioClient(MPDClient):
 @contextmanager
 def mpd_client(client_class=RadioClient):
     # Abre uma ligação ao MPD e garante que é fechada mesmo que um comando falhe
+    # Com timeout: um MPD encravado deixava a rota (e o QUEUE_LOCK, se o tivesse) presa para sempre
     client = client_class()
+    client.timeout = MPD_TIMEOUT
     client.connect("localhost", 6600)
     try:
         yield client
@@ -1227,6 +1230,15 @@ def compress(response):
     return response
 
 @app.after_request
+def security_headers(response):
+    # Nenhum outro site mostra o comando numa moldura (clickjacking), e nenhum
+    # pedido para fora leva o endereço do túnel, que é a chave de acesso
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    return response
+
+@app.after_request
 def redirect_for_script(response):
     # O fetch segue os redirects sozinho e perde o #janela do destino; para o
     # script, o redirect passa a um cabeçalho e é ele que pede a página nova
@@ -1964,6 +1976,9 @@ def remember_versions(urls):
             urls -= {v["url"] for v in alts}
 
 _versions_refreshing = set()
+# URL -> hora da última procura falhada. Sem isto, com a API em baixo, cada
+# /estado (a cada 5 s por aparelho) lançava outra procura
+_versions_failed = {}
 
 def station_versions(url, name, country):
     # Versões da rádio deste stream, só do que está guardado: o /estado não pode
@@ -1973,8 +1988,10 @@ def station_versions(url, name, country):
         return entry["alts"]
     if name and country:
         with _refreshing_lock:
-            fresh = url not in _versions_refreshing
-            _versions_refreshing.add(url)
+            fresh = (url not in _versions_refreshing
+                     and time.time() - _versions_failed.get(url, 0) >= STATS_RETRY_SECONDS)
+            if fresh:
+                _versions_refreshing.add(url)
         if fresh:
             threading.Thread(target=lookup_versions, args=(url, name, country), daemon=True).start()
     return entry["alts"] if entry else []
@@ -1993,8 +2010,11 @@ def lookup_versions(url, name, country):
         group = group_versions(same)
         alts = group[0]["variants"] if group else [{"url": url, "codec": "", "bitrate": 0, "uuid": "", "label": "?"}]
         save_versions(alts)
+        with _refreshing_lock:
+            _versions_failed.pop(url, None)
     except (OSError, ValueError):
-        pass
+        with _refreshing_lock:
+            _versions_failed[url] = time.time()
     finally:
         with _refreshing_lock:
             _versions_refreshing.discard(url)
@@ -2374,7 +2394,9 @@ def vote():
 
 @app.route("/play", methods=["POST"])
 def play():
-    with mpd_client() as c:
+    # Com o QUEUE_LOCK, como o vigia: sem ele, uma volta do vigia já a meio podia
+    # religar a estação anterior logo a seguir a este ▶ ou ao ⏹
+    with QUEUE_LOCK, mpd_client() as c:
         # Depois de o stream falhar, o ▶ tenta outra vez essa estação
         song = watched_song(c, c.currentsong())
         if song.get("id"):
@@ -2385,7 +2407,7 @@ def play():
 
 @app.route("/stop", methods=["POST"])
 def stop():
-    with mpd_client() as c:
+    with QUEUE_LOCK, mpd_client() as c:
         c.stop()
     return done()
 

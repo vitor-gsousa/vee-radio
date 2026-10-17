@@ -797,24 +797,34 @@ def write_state(path, entry):
 def set_preview(entry):
     write_state(PREVIEW_FILE, entry)
 
-# Última estação removida com o ✕, para se poder anular durante uns minutos. O
-# nome e o logótipo vão com ela: se só estavam nessa playlist, saíram com a remoção
+# Últimas estações removidas (o ✕ ou "Remover" das escolhidas), de qualquer
+# playlist, para se poder anular durante uns minutos. O nome e o logótipo vão com
+# elas: se só estavam nessa playlist, saíram com a remoção
 REMOVED_FILE = os.path.expanduser("~/.config/vee-radio/removida.json")
 UNDO_SECONDS = 120
 
+def note_removed(playlist, stations):
+    # stations: [(url, nome, logótipo, posição na lista)]; a posição é a de antes de remover
+    write_state(REMOVED_FILE, {"playlist": playlist or "", "t": int(time.time()),
+                               "stations": [{"url": u, "name": n, "logo": l, "pos": p} for u, n, l, p in stations]})
+
 def read_removed():
-    # {"url", "name", "logo", "pos", "playlist", "t"}, só enquanto se pode anular
-    # e se a playlist ativa ainda é a mesma
+    # {"playlist", "t", "stations": [{"url", "name", "logo", "pos"}]}, só enquanto se pode anular
     try:
         with open(REMOVED_FILE, encoding="utf-8") as f:
             removed = json.load(f)
     except (FileNotFoundError, ValueError):
         return None
-    if not isinstance(removed, dict) or not safe_url(removed.get("url") or ""):
+    if not isinstance(removed, dict) or time.time() - to_int(removed.get("t")) >= UNDO_SECONDS:
         return None
-    if time.time() - to_int(removed.get("t")) >= UNDO_SECONDS or removed.get("playlist") != active_playlist():
+    if "url" in removed:
+        # Formato antigo, de uma só estação (vale só dois minutos, mas pode estar lá ao atualizar)
+        removed = {**removed, "stations": [removed]}
+    stations = [s for s in removed.get("stations") or [] if isinstance(s, dict) and safe_url(s.get("url") or "")]
+    if not stations:
         return None
-    return removed
+    return {"playlist": str(removed.get("playlist") or ""), "t": removed["t"],
+            "stations": sorted(stations, key=lambda s: to_int(s.get("pos")))}
 
 # Ouvidas recentemente (no Início): a mais recente primeiro, sem repetidas. Uma
 # estação só conta depois de HISTORY_MIN_SECONDS a tocar, para não encher a lista
@@ -849,12 +859,14 @@ def note_played(url, name, logo):
             write_state(HISTORY_FILE, [entry] + [h for h in history if h["url"] != url][:HISTORY_SIZE - 1])
         _history_last = url
 
-def removed_context():
-    # A faixa "Anular" da página, com os segundos que faltam para o script a esconder
+def removed_context(view):
+    # A faixa "Anular" da página da playlist de onde se removeu, com os segundos que
+    # faltam para o script a esconder
     removed = read_removed()
-    if not removed:
+    if not removed or not view or removed["playlist"] != (view.get("name") or ""):
         return None
-    return {"name": removed.get("name") or removed["url"],
+    stations = removed["stations"]
+    return {"name": stations[0].get("name") or stations[0]["url"], "count": len(stations),
             "left": max(1, UNDO_SECONDS - int(time.time() - to_int(removed.get("t"))))}
 
 def preview_song(queue):
@@ -1140,7 +1152,7 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   pages=pages or {"page": 1, "more": False},
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
-                                  removed=removed_context(),
+                                  removed=removed_context(view),
                                   can_config=can_configure(), **extra)
 
 def tunnel_host():
@@ -2547,30 +2559,43 @@ def remove(song_id):
         sync_active(c)
         if pos is not None:
             song = queue[pos]
-            write_state(REMOVED_FILE, {"url": song["file"], "name": known.get("name") or display_namer({})(song),
-                                       "logo": known.get("logo"), "pos": pos, "playlist": active_playlist(),
-                                       "t": int(time.time())})
+            note_removed(active_playlist(), [(song["file"], known.get("name") or display_namer({})(song),
+                                              known.get("logo"), pos)])
     return back()
 
 @app.route("/anular", methods=["POST"])
 def undo_remove():
-    # Volta a pôr a última estação removida no mesmo sítio da lista
+    # Volta a pôr as últimas estações removidas nos mesmos sítios da lista. Por ordem
+    # de posição: cada uma volta ao sítio que tinha antes de saírem todas
     with QUEUE_LOCK, mpd_client() as c:
         removed = read_removed()
         if removed:
-            url = removed["url"]
-            queue = c.playlistinfo()
-            if url not in {s["file"] for s in queue}:
-                shown = listed(queue)
-                pos = to_int(removed.get("pos"))
-                c.addid(url, int(shown[pos]["pos"]) if pos < len(shown) else len(queue))
+            name = removed["playlist"]
+            restore = {s["url"]: (s.get("name"), s.get("logo") if LOGO_URL_RE.match(s.get("logo") or "") else None)
+                       for s in removed["stations"]}
+            if name == active_playlist():
+                for s in removed["stations"]:
+                    url = s["url"]
+                    queue = c.playlistinfo()
+                    if url not in {q["file"] for q in queue}:
+                        shown = listed(queue)
+                        pos = to_int(s.get("pos"))
+                        c.addid(url, int(shown[pos]["pos"]) if pos < len(shown) else len(queue))
+                    else:
+                        # Entretanto estava a ser experimentada: passa a ser da lista
+                        preview = read_preview()
+                        if preview and preview["url"] == url:
+                            set_preview(None)
+                sync_active(c, restore)
             else:
-                # Entretanto estava a ser experimentada: passa a ser da lista
-                preview = read_preview()
-                if preview and preview["url"] == url:
-                    set_preview(None)
-            logo = removed.get("logo")
-            sync_active(c, {url: (removed.get("name"), logo if LOGO_URL_RE.match(logo or "") else None)})
+                # Uma playlist que não está a tocar: só o ficheiro (se ainda existir)
+                path = playlist_path(name)
+                if path and os.path.isfile(path):
+                    entries = read_m3u(path)
+                    for s in removed["stations"]:
+                        if s["url"] not in {u for u, _, _ in entries}:
+                            entries.insert(to_int(s.get("pos")), (s["url"], *restore[s["url"]]))
+                    write_m3u(path, entries)
             write_state(REMOVED_FILE, None)
     return back()
 
@@ -2650,7 +2675,8 @@ def edit_playlist():
     action = request.form.get("acao", "")
     urls = {u for u in request.form.getlist("url") if safe_url(u)}
     with QUEUE_LOCK, mpd_client() as c:
-        picked = [e for e in read_m3u(path) if e[0] in urls]
+        entries = read_m3u(path)
+        picked = [e for e in entries if e[0] in urls]
         if not picked or action not in ("copiar", "mover", "remover"):
             return redirect(view_url(name))
         extra = {"n": len(picked)}
@@ -2663,6 +2689,10 @@ def edit_playlist():
             extra.update(destino=dest, ja=len(picked) - added)
         if action in ("mover", "remover"):
             remove_from_playlist(c, name, urls)
+        if action == "remover":
+            # Na playlist a tocar, o ficheiro segue a fila (sem a que se experimenta),
+            # por isso a posição no ficheiro é a mesma que na lista
+            note_removed(name, [(u, n, l, i) for i, (u, n, l) in enumerate(entries) if u in urls])
     extra["feito"] = {"copiar": "copiadas", "mover": "movidas", "remover": "removidas"}[action]
     # O ✕ de um cartão volta à lista com o mesmo filtro e ordenação
     keep = {k: v for k, v in urllib.parse.parse_qsl(urllib.parse.urlsplit(request.form.get("next", "")).query)

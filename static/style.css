@@ -266,6 +266,9 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
     background: rgba(10, 10, 12, 0.72); color: #fff; cursor: pointer;
 }
 .tile-del button .i { width: 14px; height: 14px; }
+/* Área de toque de 44 px à volta do botão de 28 px, para não se tocar nele ao tocar na rádio */
+.tile-del button { position: relative; }
+.tile-del button::before { content: ""; position: absolute; inset: -8px; }
 .tile-del button:hover { background: var(--danger); }
 .tile.pending .tile-play { opacity: 0.6; }
 .tile.flash .tile-play { animation: flash 1.2s ease-out; }

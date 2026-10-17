@@ -59,11 +59,11 @@
     </div>
     {% endif %}
 
-    {# Depois do ✕: anular durante UNDO_SECONDS. O script esconde-a quando o tempo acaba #}
-    {% if view.live and removed %}
+    {# Depois do ✕ ou de "Remover": anular durante UNDO_SECONDS. O script esconde-a quando o tempo acaba #}
+    {% if removed %}
     <div class="notice undo" data-left="{{ removed.left }}">
         {{ icon("trash", "notice-icon") }}
-        <span class="notice-body">«{{ removed.name }}» saiu da lista.</span>
+        <span class="notice-body">{% if removed.count > 1 %}{{ removed.count }} estações saíram{% else %}«{{ removed.name }}» saiu{% endif %} da lista.</span>
         <form action="/anular" method="post">
             <input type="hidden" name="next" value="{{ list_url }}">
             <button class="btn small">{{ icon("arrow-counter-clockwise") }}<span>Anular</span></button>

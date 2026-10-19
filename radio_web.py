@@ -978,15 +978,17 @@ def daily_step(c):
     elif current:
         note_day(name, current["file"])
 
-def daily_context(view, items):
-    # A linha "hoje / amanhã" na página de uma playlist diária; items pela ordem da playlist
+def daily_context(view, items, playing_url=None):
+    # A linha "hoje / amanhã" na página de uma playlist diária; items pela ordem da
+    # playlist. A estação a tocar da lista é a de hoje, como no daily_step, mesmo
+    # antes de o vigia a gravar
     if not view or not view.get("name") or view["name"] not in daily_playlists():
         return None
     urls = [s["file"] for s in items]
     if not urls:
         return {"today": None, "tomorrow": None}
     names = {s["file"]: s["name"] for s in items}
-    url = day_url(view["name"], urls)
+    url = playing_url if playing_url in names else day_url(view["name"], urls)
     return {"today": names[url], "tomorrow": names[following(url, urls)] if len(urls) > 1 else None}
 
 def removed_context(view):
@@ -1285,7 +1287,8 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
                                   removed=removed_context(view),
-                                  daily=daily_context(view, (stations if view["live"] else view["entries"]) if view else []),
+                                  daily=daily_context(view, (stations if view["live"] else view["entries"]) if view else [],
+                                                      player["current_url"] if view and view["live"] and player["current_id"] else None),
                                   can_config=can_configure(), **extra)
 
 def tunnel_host():

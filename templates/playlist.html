@@ -24,23 +24,24 @@
         {% if not view.name and cards %}
         <a class="btn primary small" href="#nova">{{ icon("floppy-disk") }}<span>Guardar como playlist</span></a>
         {% endif %}
-        <a class="btn small" href="{% if view.live %}/descobrir{% else %}/descobrir?para={{ view.name|urlencode }}{% endif %}">{{ icon("plus") }}<span>Juntar rádios</span></a>
+        <a class="btn small bar-btn" href="{% if view.live %}/descobrir{% else %}/descobrir?para={{ view.name|urlencode }}{% endif %}" aria-label="Juntar rádios">{{ icon("plus") }}<span>Juntar rádios</span></a>
         {% if view.name and cards %}
-        <button type="button" class="btn small select-toggle" aria-pressed="false">{{ icon("check-circle") }}<span>Selecionar</span></button>
+        <button type="button" class="btn small bar-btn select-toggle" aria-pressed="false" aria-label="Selecionar">{{ icon("check-circle") }}<span>Selecionar</span></button>
         {% endif %}
         {% if view.name %}
         {# Uma rádio por dia: toca a mesma até às 23:59:59 e passa à seguinte às 0:00 #}
         <form action="/playlist_diaria" method="post">
             <input type="hidden" name="nome" value="{{ view.name }}">
             <input type="hidden" name="diaria" value="{{ '0' if daily else '1' }}">
-            <button class="btn small daily-toggle" aria-pressed="{{ 'true' if daily else 'false' }}" title="{{ 'Voltar a ser uma playlist normal' if daily else 'Tocar uma rádio por dia, a mudar à meia-noite' }}">{{ icon("calendar-dots") }}<span>Uma por dia</span></button>
+            <button class="btn small bar-btn daily-toggle" aria-label="Uma rádio por dia" aria-pressed="{{ 'true' if daily else 'false' }}" title="{{ 'Voltar a ser uma playlist normal' if daily else 'Tocar uma rádio por dia, a mudar à meia-noite' }}">{{ icon("calendar-dots") }}<span>Uma por dia</span></button>
         </form>
         <a class="icon-btn" href="#renomear" title="Mudar o nome" aria-label="Mudar o nome">{{ icon("pencil-simple") }}</a>
         <a class="icon-btn" href="#apagar" title="Apagar" aria-label="Apagar a playlist">{{ icon("trash") }}</a>
         {% endif %}
     </div>
     {% if daily %}
-    <p class="hint daily-note">{{ icon("calendar-dots") }}
+    {# Na que está a tocar, data-now é a estação a tocar: quando muda, o script recarrega a página #}
+    <p class="hint daily-note"{% if view.live %} data-now="{{ current_id or '' }}"{% endif %}>{{ icon("calendar-dots") }}
         {% if daily.today %}Hoje: <strong>{{ daily.today }}</strong>.{% if daily.tomorrow %} Às 0:00 passa para <strong>{{ daily.tomorrow }}</strong>.{% endif %}
         {% else %}Uma rádio por dia: junta estações e cada uma toca um dia inteiro, pela ordem da playlist.{% endif %}
     </p>

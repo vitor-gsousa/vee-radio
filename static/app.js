@@ -402,6 +402,9 @@
         // No Início, o cartão "A tocar agora" é da página: muda-se quando a estação muda
         var panel = document.getElementById("painel");
         if (panel && panel.dataset.now !== (state.id == null ? "" : String(state.id))) changed = true;
+        // Na playlist diária a tocar, a linha "Hoje: …" segue a estação escolhida
+        var daily = document.querySelector(".daily-note[data-now]");
+        if (daily && daily.dataset.now !== (state.id == null ? "" : String(state.id))) changed = true;
         if (changed && !openModal() && !busy && !selecting()) load(location.pathname + location.search + location.hash, false);
         return true;
     }

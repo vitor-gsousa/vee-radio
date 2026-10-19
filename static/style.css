@@ -214,7 +214,11 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .page-head-text h1 { overflow-wrap: anywhere; }
 .page-head-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .hero { flex-direction: column; align-items: flex-start; justify-content: flex-start; }
-.action-bar { display: flex; align-items: center; gap: 10px; margin: -4px 0 18px; }
+.action-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: -4px 0 18px; }
+/* No telemóvel, os botões da barra ficam só com o ícone (o nome vai no aria-label),
+   senão a barra passava da largura do ecrã e desalinhava o reprodutor fixo */
+.action-bar .bar-btn { width: 40px; height: 40px; padding: 0; }
+.action-bar .bar-btn > span { display: none; }
 .action-bar form { margin: 0; }
 
 /* Avisos */
@@ -602,6 +606,8 @@ body.busy::before {
     .cover.big { width: 190px; height: 190px; }
     .filters { grid-template-columns: repeat(2, 1fr); }
     .badge-text { display: inline; }
+    .action-bar .bar-btn { width: auto; height: auto; padding: 8px 14px; }
+    .action-bar .bar-btn > span { display: inline; }
 }
 
 /* PC: barra lateral à esquerda e o reprodutor a toda a largura em baixo */

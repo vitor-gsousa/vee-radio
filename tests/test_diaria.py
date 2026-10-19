@@ -107,3 +107,13 @@ def test_pagina_diz_hoje_e_amanha(mpd, client, monkeypatch):
     page = client.get("/playlist?nome=Dia").get_data(as_text=True)
     assert "Hoje: <strong>Três</strong>" in page
     assert "passa para <strong>Um</strong>" in page
+
+
+def test_pagina_segue_a_estacao_a_tocar(mpd, client, monkeypatch):
+    # Antes de o vigia gravar a escolha, a linha já diz a que está a tocar
+    diaria_a_tocar(mpd, monkeypatch)
+    r.write_daily({"Dia": {"day": "2026-10-19", "url": "http://a/1"}})
+    mpd.playid(mpd.queue[1]["id"])
+    page = client.get("/playlist?nome=Dia").get_data(as_text=True)
+    assert "Hoje: <strong>Dois</strong>" in page
+    assert f'data-now="{mpd.queue[1]["id"]}"' in page

@@ -15,12 +15,14 @@ else
     DEST="$HOME/vee-radio-copias"
 fi
 # Caminhos a partir da pasta pessoal: as playlists, os nomes escritos à mão, a
-# playlist ativa, as ouvidas recentemente e os logótipos escolhidos
+# playlist ativa, as ouvidas recentemente, a rádio do dia das playlists diárias
+# e os logótipos escolhidos
 FILES=(
     .config/mpd/playlists
     .config/mpd/nomes.m3u
     .config/mpd/playlist-ativa.txt
     .config/vee-radio/historico.json
+    .config/vee-radio/diaria.json
     .cache/vee-radio/logos.json
 )
 

@@ -101,6 +101,22 @@ class FakeMPD:
     def clearerror(self):
         pass
 
+    def clear(self):
+        self.queue, self.current, self.state = [], None, "stop"
+
+    def load(self, name):
+        for url, _, _ in radio_web.read_m3u(radio_web.playlist_path(name)):
+            self.addid(url)
+
+    def moveid(self, song_id, pos):
+        song = next(s for s in self.queue if s["id"] == str(song_id))
+        self.queue.remove(song)
+        self.queue.insert(int(pos), song)
+        self._renumber()
+
+    def listplaylists(self):
+        return [{"playlist": f[:-len(".m3u")]} for f in sorted(os.listdir(radio_web.PLAYLIST_DIR)) if f.endswith(".m3u")]
+
     def command_list_ok_begin(self):
         pass
 

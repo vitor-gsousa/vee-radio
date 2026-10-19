@@ -18,7 +18,7 @@
                 {{ m.cover(pl) }}
                 <span class="row-body">
                     <span class="row-title">{{ pl.name }}</span>
-                    <span class="row-meta">{% if pl.name == active %}<span class="playing-tag">{{ icon("speaker-high") }} A tocar</span> · {% endif %}{{ pl.count }} {{ 'estação' if pl.count == 1 else 'estações' }}</span>
+                    <span class="row-meta">{% if pl.name == active %}<span class="playing-tag">{{ icon("speaker-high") }} A tocar</span> · {% endif %}{{ pl.count }} {{ 'estação' if pl.count == 1 else 'estações' }}{% if pl.daily %} · uma por dia{% endif %}</span>
                 </span>
             </a>
             {% if pl.name != active %}

@@ -1,3 +1,4 @@
+import datetime
 import gzip
 import hashlib
 import hmac
@@ -252,12 +253,30 @@ def extinf(name, logo):
     attrs = f' tvg-logo="{logo}"' if logo else ""
     return f"#EXTINF:-1{attrs},{name or ''}\n"
 
-def write_m3u(path, entries):
+# Playlist diária: toca uma só rádio durante o dia todo e passa à seguinte à
+# meia-noite. A marca vai numa linha de comentário do .m3u (o MPD ignora-a), para
+# acompanhar o ficheiro quando se muda o nome, se apaga ou se faz a cópia de segurança
+DAILY_MARK = "#VEE-RADIO:diaria"
+
+def m3u_daily(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            head = [f.readline().strip() for _ in range(2)]
+    except FileNotFoundError:
+        return False
+    return DAILY_MARK in head
+
+def write_m3u(path, entries, daily=None):
     # Escreve num ficheiro à parte e troca-o de uma vez: quem ler a playlist ao
-    # mesmo tempo (outro pedido, o MPD) nunca a apanha vazia ou a meio
+    # mesmo tempo (outro pedido, o MPD) nunca a apanha vazia ou a meio.
+    # daily None mantém a marca de playlist diária que o ficheiro já tinha
+    if daily is None:
+        daily = m3u_daily(path)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write("#EXTM3U\n")
+        if daily:
+            f.write(DAILY_MARK + "\n")
         for url, name, logo in entries:
             if name or logo:
                 f.write(extinf(name, logo))
@@ -362,7 +381,7 @@ def file_sig(path):
 # As playlists só são lidas outra vez quando algum ficheiro muda: o /estado (a cada
 # 5 segundos, por cada pessoa com a página aberta), a página e cada logótipo
 # precisam dos nomes, e ler tudo de cada vez era o que mais pesava
-_index_cache = {"key": None, "info": {}, "counts": {}, "covers": {}}
+_index_cache = {"key": None, "info": {}, "counts": {}, "covers": {}, "members": {}, "daily": set()}
 _index_lock = threading.Lock()
 
 def station_index():
@@ -373,7 +392,7 @@ def station_index():
     with _index_lock:
         if _index_cache["key"] == key:
             return _index_cache["info"], _index_cache["counts"], _index_cache["covers"]
-    info, counts, covers, members = {}, {}, {}, {}
+    info, counts, covers, members, daily = {}, {}, {}, {}, set()
     for path in paths + [NAMES_FILE]:
         entries = read_m3u(path)
         if path != NAMES_FILE:
@@ -382,6 +401,8 @@ def station_index():
             members[name] = {u for u, _, _ in entries}
             # Capa da playlist, como no Spotify: os logótipos das primeiras quatro estações
             covers[name] = [(logo_key(u), n or "") for u, n, _ in entries[:4]]
+            if m3u_daily(path):
+                daily.add(name)
         for url, name, logo in entries:
             entry = info.setdefault(url, {"name": None, "logo": None})
             if name:
@@ -389,13 +410,18 @@ def station_index():
             if logo:
                 entry["logo"] = logo
     with _index_lock:
-        _index_cache.update(key=key, info=info, counts=counts, covers=covers, members=members)
+        _index_cache.update(key=key, info=info, counts=counts, covers=covers, members=members, daily=daily)
     return info, counts, covers
 
 def playlist_members():
     # Nome da playlist -> URLs que tem (para o ✓ do menu "Juntar a"). Partilhado: só para ler
     station_index()
     return _index_cache["members"]
+
+def daily_playlists():
+    # Nomes das playlists diárias. Partilhado: só para ler
+    station_index()
+    return _index_cache["daily"]
 
 def station_info():
     # URL -> {"name", "logo"}, juntando as playlists guardadas e o ficheiro de
@@ -861,6 +887,108 @@ def note_played(url, name, logo):
             write_state(HISTORY_FILE, [entry] + [h for h in history if h["url"] != url][:HISTORY_SIZE - 1])
         _history_last = url
 
+# A rádio do dia de cada playlist diária: {nome: {"day": "AAAA-MM-DD", "url"}}. Muda
+# quando se toca outra estação dessa playlist durante o dia, e o dia seguinte começa
+# na estação a seguir a ela (dando a volta no fim da lista)
+DAILY_FILE = os.path.expanduser("~/.config/vee-radio/diaria.json")
+# (playlist, dia) que o vigia viu na volta anterior, para dar pela meia-noite
+_daily_seen = None
+
+def today():
+    # O dia na hora do telemóvel
+    return datetime.date.today().isoformat()
+
+def read_daily():
+    try:
+        with open(DAILY_FILE, encoding="utf-8") as f:
+            days = json.load(f)
+    except (FileNotFoundError, ValueError):
+        return {}
+    if not isinstance(days, dict):
+        return {}
+    return {k: v for k, v in days.items() if isinstance(v, dict) and isinstance(v.get("url"), str)}
+
+def write_daily(update):
+    # update: nome -> entrada, ou None para a esquecer
+    days = read_daily()
+    for name, entry in update.items():
+        if entry is None:
+            days.pop(name, None)
+        else:
+            days[name] = entry
+    write_state(DAILY_FILE, days)
+
+def note_day(name, url):
+    if read_daily().get(name) != {"day": today(), "url": url}:
+        write_daily({name: {"day": today(), "url": url}})
+
+def following(url, urls):
+    # A estação a seguir a url na lista, dando a volta; a primeira se url já lá não está
+    return urls[(urls.index(url) + 1) % len(urls)] if url in urls else urls[0]
+
+def day_url(name, urls, store=False):
+    # A rádio de hoje da playlist diária (urls pela ordem da playlist): a guardada
+    # se for de hoje, senão a seguinte à do último dia. store guarda-a como a de hoje
+    if not urls:
+        return None
+    entry = read_daily().get(name) or {}
+    url = entry["url"] if entry.get("day") == today() and entry.get("url") in urls else following(entry.get("url"), urls)
+    if store:
+        note_day(name, url)
+    return url
+
+def daily_song(c, new_day_only=False):
+    # A entrada da fila com a rádio de hoje, se a playlist a tocar for diária. Com
+    # new_day_only, só quando o dia ainda não tem rádio (passou a meia-noite parado)
+    name = active_playlist()
+    if not name or name not in daily_playlists():
+        return None
+    if new_day_only and (read_daily().get(name) or {}).get("day") == today():
+        return None
+    queue = listed(c.playlistinfo())
+    url = day_url(name, [s["file"] for s in queue], store=True)
+    return next((s for s in queue if s["file"] == url), None)
+
+def daily_step(c):
+    # Uma volta do vigia para a playlist diária: à meia-noite (ou ao arrancar num dia
+    # novo) passa a tocar a rádio seguinte. Parado, não começa a tocar: o ▶ toca a
+    # rádio do dia. Durante o dia, a estação que se escolhe passa a ser a do dia
+    global _daily_seen
+    name = active_playlist()
+    if not name or name not in daily_playlists():
+        _daily_seen = None
+        return
+    day = today()
+    seen, _daily_seen = _daily_seen, (name, day)
+    status = c.status()
+    if status.get("state") != "play":
+        return
+    queue = listed(c.playlistinfo())
+    current = next((s for s in queue if s["id"] == status.get("songid")), None)
+    entry = read_daily().get(name)
+    # Mudou o dia com esta playlist a tocar (ou a app arrancou num dia novo). Se só
+    # agora passou a ser a playlist a tocar, fica a estação que se escolheu
+    new_day = seen is None or (seen[0] == name and seen[1] != day)
+    if entry and entry.get("day") != day and new_day:
+        song = daily_song(c)
+        if song and not (current and song["id"] == current["id"]):
+            replay(c, song["id"])
+            note_choice(song["id"])
+            drop_preview(c)
+    elif current:
+        note_day(name, current["file"])
+
+def daily_context(view, items):
+    # A linha "hoje / amanhã" na página de uma playlist diária; items pela ordem da playlist
+    if not view or not view.get("name") or view["name"] not in daily_playlists():
+        return None
+    urls = [s["file"] for s in items]
+    if not urls:
+        return {"today": None, "tomorrow": None}
+    names = {s["file"]: s["name"] for s in items}
+    url = day_url(view["name"], urls)
+    return {"today": names[url], "tomorrow": names[following(url, urls)] if len(urls) > 1 else None}
+
 def removed_context(view):
     # A faixa "Anular" da página da playlist de onde se removeu, com os segundos que
     # faltam para o script a esconder
@@ -1123,7 +1251,9 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
         list_url = view["url"] + (("&" if "?" in view["url"] else "?") + urllib.parse.urlencode(list_params)
                                   if list_params else "")
     _, counts, covers = station_index()
-    playlists = [{"name": p, "count": counts.get(p, 0), "cover": covers.get(p, [])} for p in stored_playlists]
+    daily = daily_playlists()
+    playlists = [{"name": p, "count": counts.get(p, 0), "cover": covers.get(p, []), "daily": p in daily}
+                 for p in stored_playlists]
     # A estação que falhou: a que o vigia desistiu de religar, ou pelo URL na
     # mensagem de erro do MPD ("Failed to decode http://...")
     failure = stream_failure()
@@ -1155,6 +1285,7 @@ def render_page(template, page, results=None, query="", filters=None, theme=None
                                   failed=failed, stream_error=stream_error, stream_lost=bool(failure),
                                   failed_name=failed["name"] if failed else (failure or {}).get("name"),
                                   removed=removed_context(view),
+                                  daily=daily_context(view, (stations if view["live"] else view["entries"]) if view else []),
                                   can_config=can_configure(), **extra)
 
 def tunnel_host():
@@ -2384,6 +2515,7 @@ def watch_stream():
                     st = {"seq": _choice["seq"], "wanted": None, "attempts": 0, "retry_at": None}
                 while True:
                     with QUEUE_LOCK:
+                        daily_step(c)
                         watch_step(c, st)
                     time.sleep(WATCH_INTERVAL)
         except Exception as e:  # o vigia não pode morrer: volta a ligar e continua
@@ -2449,8 +2581,9 @@ def play():
     # Com o QUEUE_LOCK, como o vigia: sem ele, uma volta do vigia já a meio podia
     # religar a estação anterior logo a seguir a este ▶ ou ao ⏹
     with QUEUE_LOCK, mpd_client() as c:
-        # Depois de o stream falhar, o ▶ tenta outra vez essa estação
-        song = watched_song(c, c.currentsong())
+        # Depois de o stream falhar, o ▶ tenta outra vez essa estação. Numa playlist
+        # diária que parou antes da meia-noite, toca a rádio do dia novo
+        song = daily_song(c, new_day_only=True) or watched_song(c, c.currentsong())
         if song.get("id"):
             c.playid(song["id"])
         else:
@@ -2730,7 +2863,31 @@ def rename_playlist():
         os.rename(path, new_path)
         if was_active:
             set_active(new)
+        days = read_daily()
+        if name in days:
+            write_daily({name: None, new: days[name]})
     return redirect(view_url(new))
+
+@app.route("/playlist_diaria", methods=["POST"])
+def toggle_daily():
+    # Liga ou desliga "uma rádio por dia" numa playlist
+    name = request.form.get("nome", "").strip()
+    path = playlist_path(name)
+    if path is None or not os.path.isfile(path):
+        return error_page("Playlist inexistente", "Essa playlist já não existe.", 404)
+    on = request.form.get("diaria") == "1"
+    with QUEUE_LOCK:
+        write_m3u(path, read_m3u(path), daily=on)
+        if on and name == active_playlist():
+            # A rádio de hoje é a que está a tocar (ou a primeira): só muda à meia-noite
+            with mpd_client() as c:
+                urls = [s["file"] for s in listed(c.playlistinfo())]
+                current = c.currentsong().get("file")
+                if urls:
+                    note_day(name, current if current in urls else urls[0])
+    text = (f"«{name}» passa a tocar uma rádio por dia e muda para a seguinte às 0:00." if on
+            else f"«{name}» volta a ser uma playlist normal.")
+    return with_notice(redirect(view_url(name)), text)
 
 def switch_queue(c, name):
     # Põe na fila a playlist name (que passa a ser a ativa) sem cortar a rádio que
@@ -2786,7 +2943,12 @@ def load_playlist():
         # A rádio que está a tocar continua; parado, começa pela primeira (uma
         # playlist vazia não tem posição 0 para tocar)
         if not switch_queue(c, name) and c.status().get("playlistlength", "0") != "0":
-            c.play(0)
+            # Numa playlist diária, começa pela rádio do dia
+            song = daily_song(c)
+            if song:
+                c.playid(song["id"])
+            else:
+                c.play(0)
     return redirect(view_url(name))
 
 @app.route("/create_playlist", methods=["POST"])
@@ -2799,12 +2961,13 @@ def create_playlist():
         if os.path.exists(path):
             return error_page("Playlist existente", f"Já existe uma playlist «{name}». Escolhe outro nome.", 400)
         os.makedirs(PLAYLIST_DIR, exist_ok=True)
+        daily = request.form.get("diaria") == "1"
         with mpd_client() as c:
             if request.form.get("from") == "atuais":
-                write_m3u(path, queue_entries(c))
+                write_m3u(path, queue_entries(c), daily=daily)
             else:
                 # A rádio que está a tocar continua, como a experimentar
-                write_m3u(path, [])
+                write_m3u(path, [], daily=daily)
                 switch_queue(c, name)
         set_active(name)
     return redirect(view_url(name))
@@ -2823,6 +2986,8 @@ def delete_playlist():
             pass
         if was_active:
             set_active("")
+        if name in read_daily():
+            write_daily({name: None})
     return redirect("/playlists")
 
 # Configurações (.env). Lidas como o env_value do start.sh: KEY=valor, a última

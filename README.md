@@ -149,6 +149,7 @@ Cada cópia leva:
 - os nomes escritos à mão;
 - a playlist ativa;
 - as rádios ouvidas recentemente;
+- a rádio do dia das playlists diárias;
 - os logótipos escolhidos.
 
 O `.env` (com o token do ntfy e o webhook do Teams) e a chave das Configurações ficam de fora, porque no armazenamento partilhado outras apps conseguiam lê-los.
@@ -200,6 +201,8 @@ Tema escuro, como as apps de música. No telemóvel há três separadores em bai
 
   A mesma rádio aparece uma só vez, mesmo que o radio-browser a tenha em várias versões (MP3 128, AAC 64...): o ▶ e o + usam a melhor (conta o bitrate e o codec, porque um AAC a 64 soa como um MP3 a 128) e o pill "N versões" mostra as outras. Em todos os resultados, o ▶ experimenta a rádio sem a juntar à lista (o reprodutor mostra "A experimentar" e um botão "Juntar") e o + abre a lista das playlists para escolher onde a juntar (✓ nas que já a têm; juntar a uma que não está a tocar não muda a música). No fim da lista, "Nova playlist" cria uma playlist já com essa rádio, sem a pôr a tocar. Nos temas e países, o botão "Juntar" no topo junta as rádios da página à playlist que está a tocar, ou, se se escolher, a outra ou a uma playlist nova, que passa a ser a do Início.
 - **Playlists**: as playlists com uma capa feita dos logótipos das primeiras estações. O ▶ passa uma para o Início sem cortar a rádio que está a tocar: se ela estiver na playlist nova continua como estação dessa lista, se não estiver continua como "A experimentar" (com "Juntar") até se escolher outra; com a música parada, começa pela primeira estação. Tocar no nome abre a página da playlist sem mudar a música, onde também se juntam rádios, se muda o nome e se apaga
+
+**Playlist diária** ("Uma por dia" na página da playlist, ou ao criá-la em "Nova playlist"): toca a mesma rádio o dia todo e, às 0:00, passa para a seguinte da lista (no fim volta à primeira). A página diz qual é a de hoje e qual vem a seguir. Se escolheres outra estação durante o dia, o dia seguinte começa na que vem depois dela. Se estiver parada à meia-noite, não começa a tocar sozinha: o ▶ toca a rádio do novo dia. A hora é a do telemóvel.
 
 As janelas por cima da página ficam para as coisas pequenas: nova playlist, confirmar apagar, mudar o nome, configurações e o reprodutor aberto. Com JavaScript, mudar de página não recarrega tudo, a pesquisa de rádios corre enquanto se escreve, os filtros aplicam-se ao mudar, aparecem esqueletos a brilhar enquanto os dados e os logótipos carregam, os botões respondem sem recarregar a página e o reprodutor atualiza-se sozinho a cada 5 segundos (estação, música, volume).
 

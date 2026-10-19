@@ -39,6 +39,7 @@
             <h2>Nova playlist</h2>
             <form action="/create_playlist" method="post" class="stack">
                 <input type="text" name="playlist_name" placeholder="Nome (ex: Favoritas, Jazz)" required>
+                <label class="check"><input type="checkbox" name="diaria" value="1"><span>Uma rádio por dia <span class="muted small">(toca a mesma o dia todo e muda à meia-noite)</span></span></label>
                 {% if stations %}
                 <button class="btn primary" name="from" value="atuais">Criar com as {{ stations|length }} estações atuais</button>
                 {% endif %}

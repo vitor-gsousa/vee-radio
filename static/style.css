@@ -48,6 +48,9 @@ a { color: inherit; }
 .eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
 .hint { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin: 10px 2px; font-size: 13px; color: var(--muted); }
 .hint .i { width: 14px; height: 14px; }
+.daily-note { display: block; line-height: 1.5; }
+.daily-note .i { vertical-align: -2px; margin-right: 4px; }
+.daily-note strong { color: var(--text); }
 .section-title { font-size: 18px; margin: 22px 2px 4px; }
 
 /* Ícones (Phosphor, static/icons.svg) */
@@ -344,7 +347,7 @@ label.field, p.field { display: block; margin: 6px 2px -2px; font-size: 13px; fo
 .selecting .tile-check input { position: relative; z-index: 1; width: 22px; height: 22px; }
 .selecting .tile-check:has(input:checked) { background: rgba(232, 110, 84, 0.16); box-shadow: inset 0 0 0 2px var(--accent-fg); }
 .selecting .tile-del, .selecting .tile-fab, .selecting .badge { display: none; }
-.select-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.select-toggle[aria-pressed="true"], .daily-toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 /* Com JavaScript: barra por cima do reprodutor, só no modo Selecionar */
 .js .edit-panel {
     position: fixed; left: 8px; right: 8px; z-index: 19; margin: 0;

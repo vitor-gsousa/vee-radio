@@ -2,6 +2,8 @@
 
 Jukebox de rádio para um telemóvel Android antigo. Corre em [Termux](https://termux.dev) e usa o **MPD** para tocar streams de rádio, uma pequena app **Flask** como comando web e um **Cloudflare Tunnel** para aceder ao comando de qualquer lado.
 
+Para instalar e usar passo a passo, com imagens, lê o [manual](docs/MANUAL.md).
+
 ## Ficheiros
 
 | Ficheiro | Função |

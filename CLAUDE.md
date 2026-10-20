@@ -86,6 +86,10 @@ A radio jukebox for an old Android phone running Termux. MPD plays the radio str
 - **Termux:Boot**: `install.sh` writes `~/.termux/boot/vee-radio`. It runs `~/update.sh --boot` and then `~/start.sh --boot`, logging to `~/boot.log`. With `--boot`, start.sh waits up to 2 minutes for internet right before starting cloudflared, and only when the tunnel is on, so MPD and the local remote come up at once. Boot scripts from older installs wait themselves and call start.sh without `--boot`, which also works.
 - **install.sh** is idempotent and is meant to be run as `curl | bash`. All logic sits inside `main()` so bash reads the whole script before running any of it. It links `~/start.sh`, `~/stop.sh`, `~/config.sh`, `~/update.sh` and `~/backup.sh` to the repo, and symlinks `~/.config/mpd/mpd.conf` to the repo copy, so edits to `mpd.conf` apply after `git pull`. `REPO_URL` points to the public repo `github.com/vitor-gsousa/vee-radio`. It can be overridden with `VEE_RADIO_REPO`.
 
+## User manual
+
+[docs/MANUAL.md](docs/MANUAL.md) is the end-user guide (installation and daily use, European Portuguese), linked from the README. Its screenshots in `docs/imagens/` were taken from the real app with `FakeMPD` and example Portuguese stations, phone shots at 390 px CSS width (saved 540 px wide, 256 colours). When a change alters a page or a flow it describes, update the text and, if the look changed, the screenshot.
+
 ## Running / testing on the device
 
 ```bash

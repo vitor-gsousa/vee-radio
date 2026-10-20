@@ -100,6 +100,8 @@ O `start.sh` também pode enviar o link para um chat ou canal do Teams, com ou s
 TEAMS_WEBHOOK_URL=https://...
 ```
 
+Cada cartão mostra a data e hora do arranque; só o link do arranque mais recente funciona. Para o mais recente ficar sempre à vista, usa um canal só para isto e desliga as respostas (em **Gerir canal** → **Moderação do canal**, tira a permissão de responder; se só os moderadores puderem publicar, deixa ligada a opção que permite aos bots publicar, senão o Workflows deixa de conseguir), ou fixa o chat.
+
 Esse endereço é uma credencial (quem o tiver pode escrever no chat): não o partilhes. O link vai para cada destino configurado (ntfy e Teams); a página de partilha só abre quando não há nenhum, ou quando nenhum envio corre bem.
 
 ```bash

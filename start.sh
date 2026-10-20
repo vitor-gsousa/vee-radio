@@ -106,8 +106,9 @@ send_teams() {
     # O modelo dos Workflows só aceita um Adaptive Card dentro de attachments. O link
     # do túnel só tem letras, números, - e . (vem do grep), e o nome da app não tem aspas
     # duplas nem \ (o radio_web.py recusa-os), por isso vão tal e qual no JSON.
-    # Em UTF-8 pelo stdin, por causa dos acentos
-    printf '{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.4","body":[{"type":"TextBlock","text":"%s","weight":"Bolder","size":"Medium"},{"type":"TextBlock","text":"Link do comando: %s","wrap":true}],"actions":[{"type":"Action.OpenUrl","title":"Abrir comando","url":"%s"}]}}]}' "$(app_name)" "$1" "$1" |
+    # A data e hora do arranque (hora do telemóvel) mostram qual é o link atual: os
+    # dos arranques anteriores já não funcionam. Em UTF-8 pelo stdin, por causa dos acentos
+    printf '{"type":"message","attachments":[{"contentType":"application/vnd.microsoft.card.adaptive","content":{"$schema":"http://adaptivecards.io/schemas/adaptive-card.json","type":"AdaptiveCard","version":"1.4","body":[{"type":"TextBlock","text":"%s","weight":"Bolder","size":"Medium"},{"type":"TextBlock","text":"Arranque: %s","isSubtle":true,"spacing":"None"},{"type":"TextBlock","text":"Link do comando: %s","wrap":true}],"actions":[{"type":"Action.OpenUrl","title":"Abrir comando","url":"%s"}]}}]}' "$(app_name)" "$(date '+%d/%m/%Y %H:%M')" "$1" "$1" |
         curl -K <(printf 'url = "%s"\n' "$webhook") -fsS --max-time 15 -o /dev/null \
             -H "Content-Type: application/json; charset=utf-8" \
             --data-binary @-
